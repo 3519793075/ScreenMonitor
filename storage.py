@@ -26,28 +26,16 @@ class StorageManager:
         cursor.execute('''
                        CREATE TABLE IF NOT EXISTS activity_sessions
                        (
-                           session_id
-                           TEXT
-                           PRIMARY
-                           KEY,
-                           start_time
-                           TEXT,
-                           end_time
-                           TEXT,
-                           app_name
-                           TEXT,
-                           window_title
-                           TEXT,
-                           ai_summary
-                           TEXT,
-                           category
-                           TEXT,    -- 'study', 'entertainment', 'unknown' 等
-                           is_deviated
-                           BOOLEAN, -- 是否偏离学习目标
-                           confidence
-                           REAL,    -- AI 识别置信度
-                           evidence_image_path
-                           TEXT     -- 如果严重偏离，保留的截图证据路径
+                           session_id TEXT PRIMARY KEY,
+                           start_time TEXT,
+                           end_time TEXT,
+                           app_name TEXT,
+                           window_title TEXT,
+                           ai_summary TEXT,
+                           category TEXT,    -- 'study', 'entertainment', 'unknown' 等
+                           is_deviated BOOLEAN, -- 是否偏离学习目标
+                           confidence REAL,    -- AI 识别置信度
+                           evidence_image_path TEXT     -- 如果严重偏离，保留的截图证据路径
                        )
                        ''')
 
