@@ -1,0 +1,64 @@
+# ==========================================
+# AI 学习监工 (AI Supervisor) 全局配置文件
+# ==========================================
+
+capture:
+  interval_seconds: 5              # 截图间隔（秒）
+  scale_percent: 50                # 缩放比例（50%或60%，大幅降低内存和API传输成本）
+  target_screen: "main"            # 截图范围（main: 主屏, all: 所有屏幕）
+  format: "jpg"                    # 格式（jpg比png体积小，适合频繁读写）
+  quality: 70                      # 图像质量（1-100，70足以让AI看清文字）
+
+triggers:
+  min_ai_interval_seconds: 3      # 最小 AI 分析间隔（秒，防止短时间内重复调用）
+  idle_timeout_seconds: 60         # 空闲判定（秒，键鼠无操作超过此时间记为idle）
+  static_skip_count: 3             # 连续静态跳过次数（画面无变化超过3次，强行不调用AI）
+  trigger_on_window_switch: true   # 窗口切换（检测到前台进程改变，立即触发一次轻量分析）
+  static_screen_threshold: 2.0         # 差异度低于此值算作“静止”
+  inherit_previous_state: true         # 静止时默认继承上一次的 AI 判断
+  static_reading_grace_seconds: 120    # 宽限期：静止且无输入在此时间内，算正常阅读/思考
+  no_input_suspect_seconds: 180        # 质疑期：超过此时间无输入，标记为“疑似停滞”
+  static_recheck_ai_seconds: 300       # 强制复查期：即便一直静止，每隔这么久强制调一次AI复判
+  away_from_keyboard_seconds: 600      # 离开期：超过 10 分钟无键鼠输入，直接判定为“离开电脑”
+
+ai_models:
+  primary: "gemini-2.5-flash"        # 推荐！最新一代的闪电模型，速度更快
+  fallback: "kimi-k2.5"
+  timeout_seconds: 20              # API 超时时间（秒）
+  max_retries: 2                   # 失败重试次数
+  low_confidence_threshold: 0.7    # 低置信度阈值（低于此值时，可能触发备用模型或标记为unknown）
+  output_length: "1-2 sentences"   # Prompt 约束：输出长度
+
+storage:
+  log_format: "jsonl"              # 日志格式（推荐 jsonl 配合 sqlite 双写）
+  screenshot_retention_seconds: 60 # 常规截图保留时间（秒，配合内存 Deque 或本地清理逻辑）
+  log_retention_days: 30           # 历史日志保留时间（天）
+  anomaly_image_retention_days: 7  # 异常/违规截图保留时间（天）
+  save_raw_model_output: false     # 原始模型输出（false: 关闭，true: 调试模式开启）
+
+notifications:
+  hourly_summary_interval_hours: 1 # 小时汇总频率
+  distraction_threshold_minutes: 3 # 分心判定（连续偏离目标超过3分钟，标记为严重分心）
+  min_session_length_minutes: 1    # session 最短时长（短于1分钟的碎片状态可被合并或忽略）
+  daily_summary_time: "22:00"      # 每日晚总结推送时间
+
+system:
+  run_on_startup: true             # 开机自启动
+  auto_start_monitoring: true      # 启动后自动进入监督模式
+  show_tray_icon: true             # 是否显示系统托盘图标
+  silent_mode: true                # 是否静默运行（无弹窗打扰）
+  cpu_limit_strategy: "low"        # CPU 占用上限策略（low: 降低线程优先级, throttle: 强行休眠降频）
+  cache_tasks_offline: true        # 网络不可用时是否缓存分析任务（只缓存日志，丢弃旧图）
+  retry_on_reconnect: true         # 断网重连后的补发策略（将离线期间合并后的 session 同步）
+
+# ==========================================
+# 目标与黑白名单 (可单独提成 goals.yaml)
+# ==========================================
+context:
+  current_goal: "完成 Python 自动化工具开发"
+  # (此类具体目标建议接回上一轮提到的 allowed_apps / blocked_keywords 等)
+
+api_keys:
+  gemini: ""
+  kimi: "sk-XX"
+  feishu_webhook: "在这里填入你的_飞书机器人_Webhook_URL"
