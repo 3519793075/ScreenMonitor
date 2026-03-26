@@ -1,13 +1,19 @@
 import asyncio
+import hashlib
+import hmac
+import json
 import os
+import secrets
 import sqlite3
 import threading
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+import yaml
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from loguru import logger
 
@@ -18,18 +24,343 @@ from storage import StorageManager
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
+CONFIG_PATH = BASE_DIR / "config.yaml"
+AUTH_PATH = BASE_DIR / "admin_auth.json"
+UNLOCK_TTL_SECONDS = 600
 
 config = None
 storage_manager = None
 ai_router = None
 collector_instance = None
 main_loop = None
+unlock_sessions: dict[str, float] = {}
+
+SETTINGS_FIELDS = [
+    {
+        "id": "current_goal",
+        "path": ["context", "current_goal"],
+        "group": "basic",
+        "label": "当前目标",
+        "type": "text",
+        "help": "用于指导判定用户当前行为是否与目标一致。",
+        "effect": "保存后立即生效",
+    },
+    {
+        "id": "interval_seconds",
+        "path": ["capture", "interval_seconds"],
+        "group": "basic",
+        "label": "截图间隔",
+        "type": "number",
+        "kind": "int",
+        "help": "单位：秒。",
+        "effect": "保存后立即生效",
+    },
+    {
+        "id": "static_reading_grace_seconds",
+        "path": ["triggers", "static_reading_grace_seconds"],
+        "group": "basic",
+        "label": "静态判定宽限",
+        "type": "number",
+        "kind": "int",
+        "help": "单位：秒。",
+        "effect": "保存后立即生效",
+    },
+    {
+        "id": "hourly_summary_interval_hours",
+        "path": ["notifications", "hourly_summary_interval_hours"],
+        "group": "basic",
+        "label": "小时汇总频率",
+        "type": "number",
+        "kind": "int",
+        "help": "单位：小时。",
+        "effect": "保存后立即生效",
+    },
+    {
+        "id": "daily_summary_time",
+        "path": ["notifications", "daily_summary_time"],
+        "group": "basic",
+        "label": "每日总结时间",
+        "type": "time",
+        "help": "格式：HH:MM。",
+        "effect": "保存后立即生效",
+    },
+    {
+        "id": "screenshot_retention_seconds",
+        "path": ["storage", "screenshot_retention_seconds"],
+        "group": "basic",
+        "label": "截图保留时间",
+        "type": "number",
+        "kind": "int",
+        "help": "单位：秒。",
+        "effect": "保存后立即生效",
+    },
+    {
+        "id": "idle_timeout_seconds",
+        "path": ["triggers", "idle_timeout_seconds"],
+        "group": "rules",
+        "label": "空闲判定阈值",
+        "type": "number",
+        "kind": "int",
+        "help": "单位：秒。",
+        "effect": "保存后立即生效",
+    },
+    {
+        "id": "static_skip_count",
+        "path": ["triggers", "static_skip_count"],
+        "group": "rules",
+        "label": "静态跳过次数",
+        "type": "number",
+        "kind": "int",
+        "help": "连续静态帧达到该次数后减少 AI 调用。",
+        "effect": "保存后立即生效",
+    },
+    {
+        "id": "trigger_on_window_switch",
+        "path": ["triggers", "trigger_on_window_switch"],
+        "group": "rules",
+        "label": "窗口切换立即判定",
+        "type": "checkbox",
+        "help": "检测到前台窗口变化时立即触发一次分析。",
+        "effect": "保存后立即生效",
+    },
+    {
+        "id": "static_screen_threshold",
+        "path": ["triggers", "static_screen_threshold"],
+        "group": "rules",
+        "label": "静态屏幕阈值",
+        "type": "number",
+        "kind": "float",
+        "step": "0.1",
+        "help": "差异低于该值时视为静态。",
+        "effect": "保存后立即生效",
+    },
+    {
+        "id": "inherit_previous_state",
+        "path": ["triggers", "inherit_previous_state"],
+        "group": "rules",
+        "label": "静态时继承前一状态",
+        "type": "checkbox",
+        "help": "降低静态阅读场景下的误判。",
+        "effect": "保存后立即生效",
+    },
+    {
+        "id": "no_input_suspect_seconds",
+        "path": ["triggers", "no_input_suspect_seconds"],
+        "group": "rules",
+        "label": "无输入疑似停滞阈值",
+        "type": "number",
+        "kind": "int",
+        "help": "单位：秒。",
+        "effect": "保存后立即生效",
+    },
+    {
+        "id": "away_from_keyboard_seconds",
+        "path": ["triggers", "away_from_keyboard_seconds"],
+        "group": "rules",
+        "label": "离开设备阈值",
+        "type": "number",
+        "kind": "int",
+        "help": "单位：秒。",
+        "effect": "保存后立即生效",
+    },
+    {
+        "id": "run_on_startup",
+        "path": ["system", "run_on_startup"],
+        "group": "system",
+        "label": "开机启动",
+        "type": "checkbox",
+        "help": "保存后下次系统启动生效。",
+        "effect": "保存后下次监控启动生效",
+    },
+    {
+        "id": "auto_start_monitoring",
+        "path": ["system", "auto_start_monitoring"],
+        "group": "system",
+        "label": "自动进入监督",
+        "type": "checkbox",
+        "help": "程序启动后自动开始监控。",
+        "effect": "保存后立即生效",
+    },
+    {
+        "id": "silent_mode",
+        "path": ["system", "silent_mode"],
+        "group": "system",
+        "label": "静默运行",
+        "type": "checkbox",
+        "help": "减少弹窗和打扰。",
+        "effect": "保存后立即生效",
+    },
+    {
+        "id": "show_tray_icon",
+        "path": ["system", "show_tray_icon"],
+        "group": "system",
+        "label": "托盘图标",
+        "type": "checkbox",
+        "help": "保存后下次监控启动生效。",
+        "effect": "保存后下次监控启动生效",
+    },
+    {
+        "id": "log_retention_days",
+        "path": ["storage", "log_retention_days"],
+        "group": "system",
+        "label": "日志保留天数",
+        "type": "number",
+        "kind": "int",
+        "help": "单位：天。",
+        "effect": "保存后立即生效",
+    },
+    {
+        "id": "anomaly_image_retention_days",
+        "path": ["storage", "anomaly_image_retention_days"],
+        "group": "system",
+        "label": "异常截图保留天数",
+        "type": "number",
+        "kind": "int",
+        "help": "单位：天。",
+        "effect": "保存后立即生效",
+    },
+    {
+        "id": "save_raw_model_output",
+        "path": ["storage", "save_raw_model_output"],
+        "group": "system",
+        "label": "保存原始模型输出",
+        "type": "checkbox",
+        "help": "用于调试模型返回。",
+        "effect": "保存后立即生效",
+    },
+    {
+        "id": "primary_model",
+        "path": ["ai_models", "primary"],
+        "group": "secure",
+        "label": "主模型",
+        "type": "text",
+        "help": "保存后建议重启服务。",
+        "effect": "保存后建议重启服务",
+        "secure": True,
+    },
+    {
+        "id": "fallback_model",
+        "path": ["ai_models", "fallback"],
+        "group": "secure",
+        "label": "备用模型",
+        "type": "text",
+        "help": "保存后建议重启服务。",
+        "effect": "保存后建议重启服务",
+        "secure": True,
+    },
+    {
+        "id": "timeout_seconds",
+        "path": ["ai_models", "timeout_seconds"],
+        "group": "secure",
+        "label": "模型超时时间",
+        "type": "number",
+        "kind": "int",
+        "help": "单位：秒。",
+        "effect": "保存后建议重启服务",
+        "secure": True,
+    },
+    {
+        "id": "max_retries",
+        "path": ["ai_models", "max_retries"],
+        "group": "secure",
+        "label": "最大重试次数",
+        "type": "number",
+        "kind": "int",
+        "help": "模型调用失败时的重试次数。",
+        "effect": "保存后建议重启服务",
+        "secure": True,
+    },
+    {
+        "id": "target_screen",
+        "path": ["capture", "target_screen"],
+        "group": "secure",
+        "label": "截图目标屏幕",
+        "type": "select",
+        "options": ["main", "all"],
+        "help": "保存后建议重启服务。",
+        "effect": "保存后建议重启服务",
+        "secure": True,
+    },
+    {
+        "id": "cpu_limit_strategy",
+        "path": ["system", "cpu_limit_strategy"],
+        "group": "secure",
+        "label": "CPU 策略",
+        "type": "select",
+        "options": ["low", "throttle"],
+        "help": "保存后建议重启服务。",
+        "effect": "保存后建议重启服务",
+        "secure": True,
+    },
+    {
+        "id": "cache_tasks_offline",
+        "path": ["system", "cache_tasks_offline"],
+        "group": "secure",
+        "label": "离线缓存策略",
+        "type": "checkbox",
+        "help": "网络不可用时缓存待处理任务。",
+        "effect": "保存后建议重启服务",
+        "secure": True,
+    },
+    {
+        "id": "retry_on_reconnect",
+        "path": ["system", "retry_on_reconnect"],
+        "group": "secure",
+        "label": "重连后重试策略",
+        "type": "checkbox",
+        "help": "网络恢复后重试未完成任务。",
+        "effect": "保存后建议重启服务",
+        "secure": True,
+    },
+    {
+        "id": "gemini_api_key",
+        "path": ["api_keys", "gemini"],
+        "group": "secure",
+        "label": "Gemini API Key",
+        "type": "password",
+        "help": "敏感字段，仅显示掩码。",
+        "effect": "保存后建议重启服务",
+        "secure": True,
+        "secret": True,
+    },
+    {
+        "id": "kimi_api_key",
+        "path": ["api_keys", "kimi"],
+        "group": "secure",
+        "label": "Kimi API Key",
+        "type": "password",
+        "help": "敏感字段，仅显示掩码。",
+        "effect": "保存后建议重启服务",
+        "secure": True,
+        "secret": True,
+    },
+    {
+        "id": "feishu_webhook",
+        "path": ["api_keys", "feishu_webhook"],
+        "group": "secure",
+        "label": "Feishu Webhook",
+        "type": "password",
+        "help": "敏感字段，仅显示掩码。",
+        "effect": "保存后建议重启服务",
+        "secure": True,
+        "secret": True,
+    },
+]
 
 
 def on_ai_trigger(frame_data):
     """Bridge collector thread events into the FastAPI event loop."""
     if main_loop and ai_router:
         asyncio.run_coroutine_threadsafe(ai_router.analyze_frame(frame_data), main_loop)
+
+
+def load_config_from_disk():
+    return ConfigLoader.load(str(CONFIG_PATH))
+
+
+def save_config_to_disk(new_config):
+    with open(CONFIG_PATH, "w", encoding="utf-8") as file:
+        yaml.safe_dump(new_config, file, allow_unicode=True, sort_keys=False)
 
 
 def get_db_path() -> Path:
@@ -58,11 +389,30 @@ def render_template(template_name: str, title: str) -> HTMLResponse:
 def normalize_date(date_str: str | None) -> str:
     if not date_str:
         return datetime.now().strftime("%Y-%m-%d")
-
     try:
         return datetime.strptime(date_str, "%Y-%m-%d").strftime("%Y-%m-%d")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD") from exc
+
+
+def get_path_value(data: dict, path: list[str]):
+    current = data
+    for key in path:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
+def set_path_value(data: dict, path: list[str], value):
+    current = data
+    for key in path[:-1]:
+        current = current.setdefault(key, {})
+    current[path[-1]] = value
+
+
+def field_map():
+    return {field["id"]: field for field in SETTINGS_FIELDS}
 
 
 def query_summary_by_date(cursor: sqlite3.Cursor, target_date: str) -> dict:
@@ -101,11 +451,9 @@ def query_sessions_by_date(cursor: sqlite3.Cursor, target_date: str, limit: int 
         ORDER BY COALESCE(updated_at, end_time, start_time) DESC
     """
     params: list[object] = [target_date]
-
     if limit is not None:
         sql += "\nLIMIT ?"
         params.append(limit)
-
     cursor.execute(sql, tuple(params))
     return [row_to_dict(row) for row in cursor.fetchall()]
 
@@ -124,7 +472,6 @@ def query_hourly_by_date(cursor: sqlite3.Cursor, target_date: str) -> list[dict]
         """,
         (target_date,),
     )
-
     rows = {row["hour"]: row_to_dict(row) for row in cursor.fetchall()}
     items = []
     for hour in range(24):
@@ -163,6 +510,152 @@ def query_latest_session(cursor: sqlite3.Cursor) -> dict | None:
     return row_to_dict(row) if row else None
 
 
+def mask_secret(value: str) -> str:
+    if not value:
+        return "未配置"
+    if len(value) <= 8:
+        return "*" * len(value)
+    return f"{value[:2]}****{value[-4:]}"
+
+
+def hash_password(password: str, salt: bytes, iterations: int) -> str:
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+    return digest.hex()
+
+
+def load_auth_state():
+    if not AUTH_PATH.exists():
+        return None
+    return json.loads(AUTH_PATH.read_text(encoding="utf-8"))
+
+
+def write_auth_state(password: str):
+    salt = secrets.token_bytes(16)
+    iterations = 200_000
+    payload = {
+        "scheme": "pbkdf2_sha256",
+        "iterations": iterations,
+        "salt": salt.hex(),
+        "password_hash": hash_password(password, salt, iterations),
+        "created_at": datetime.now().isoformat(),
+    }
+    AUTH_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def verify_password(password: str) -> bool:
+    auth = load_auth_state()
+    if not auth:
+        return False
+    salt = bytes.fromhex(auth["salt"])
+    expected = auth["password_hash"]
+    actual = hash_password(password, salt, int(auth["iterations"]))
+    return hmac.compare_digest(actual, expected)
+
+
+def issue_unlock_token() -> tuple[str, int]:
+    expires_at = int(time.time()) + UNLOCK_TTL_SECONDS
+    token = secrets.token_urlsafe(24)
+    unlock_sessions[token] = expires_at
+    return token, expires_at
+
+
+def prune_unlock_sessions():
+    now = int(time.time())
+    expired = [token for token, expiry in unlock_sessions.items() if expiry <= now]
+    for token in expired:
+        unlock_sessions.pop(token, None)
+
+
+def require_unlock_token(admin_token: str | None):
+    prune_unlock_sessions()
+    if not admin_token or unlock_sessions.get(admin_token, 0) <= int(time.time()):
+        raise HTTPException(status_code=403, detail="Sensitive settings are locked")
+
+
+def serialize_field_value(field, current_config, secure_view=False):
+    value = get_path_value(current_config, field["path"])
+    if secure_view and field.get("secret"):
+        return {
+            "configured": bool(value),
+            "masked": mask_secret(str(value or "")),
+            "secret": True,
+        }
+    return value
+
+
+def schema_groups():
+    groups = {
+        "basic": {
+            "title": "基础设置",
+            "fields": [field for field in SETTINGS_FIELDS if field["group"] == "basic"],
+        },
+        "rules": {
+            "title": "监督规则",
+            "fields": [field for field in SETTINGS_FIELDS if field["group"] == "rules"],
+        },
+        "system": {
+            "title": "系统与存储",
+            "fields": [field for field in SETTINGS_FIELDS if field["group"] == "system"],
+        },
+        "secure": {
+            "title": "高级与敏感设置",
+            "fields": [field for field in SETTINGS_FIELDS if field["group"] == "secure"],
+        },
+    }
+    return groups
+
+
+def coerce_field_value(field, value):
+    if field["type"] == "checkbox":
+        return bool(value)
+    if field["type"] == "number":
+        return float(value) if field.get("kind") == "float" else int(value)
+    return str(value).strip()
+
+
+def apply_runtime_config(new_config):
+    global config, ai_router
+
+    config = new_config
+
+    if storage_manager:
+        storage_manager.config = new_config
+
+    if collector_instance:
+        collector_instance.config = new_config
+        collector_instance.interval = new_config["capture"]["interval_seconds"]
+        collector_instance.scale = new_config["capture"]["scale_percent"] / 100.0
+        collector_instance.quality = new_config["capture"]["quality"]
+        collector_instance.format = new_config["capture"]["format"]
+        collector_instance.target_screen = new_config["capture"].get("target_screen", "main")
+
+    if storage_manager:
+        ai_router = AIRouter(new_config, storage_manager)
+
+
+def save_settings_values(payload_values: dict, *, secure_only: bool):
+    current_config = load_config_from_disk()
+    field_lookup = field_map()
+    changed_fields = []
+
+    for field_id, raw_value in payload_values.items():
+        field = field_lookup.get(field_id)
+        if not field:
+            continue
+        if secure_only != bool(field.get("secure")):
+            continue
+        if field.get("secret") and (raw_value is None or str(raw_value).strip() == ""):
+            continue
+
+        coerced = coerce_field_value(field, raw_value)
+        set_path_value(current_config, field["path"], coerced)
+        changed_fields.append(field)
+
+    save_config_to_disk(current_config)
+    apply_runtime_config(current_config)
+    return changed_fields
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize the monitor stack and flush the current session on shutdown."""
@@ -181,7 +674,7 @@ async def lifespan(app: FastAPI):
     logger.info("[System] Initializing AI supervisor")
     main_loop = asyncio.get_running_loop()
 
-    config = ConfigLoader.load("config.yaml")
+    config = load_config_from_disk()
     storage_manager = StorageManager(config)
     ai_router = AIRouter(config, storage_manager)
     collector_instance = DataCollector(config)
@@ -205,8 +698,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="AI Supervisor Engine",
-    description="Local AI supervisor with live dashboard and session analytics.",
-    version="2.1",
+    description="Local AI supervisor with live dashboard, analytics, and settings.",
+    version="2.2",
     lifespan=lifespan,
 )
 
@@ -219,6 +712,11 @@ async def dashboard():
 @app.get("/history")
 async def history_page():
     return render_template("history.html", "ScreenMonitor History")
+
+
+@app.get("/settings")
+async def settings_page():
+    return render_template("settings.html", "ScreenMonitor Settings")
 
 
 @app.get("/api/health")
@@ -237,7 +735,6 @@ async def get_current_session():
 async def get_system_status():
     if not collector_instance:
         return {"error": "System not fully started"}
-
     return {
         "current_app": collector_instance.last_app_name,
         "current_window": collector_instance.last_window_title,
@@ -291,7 +788,6 @@ async def dashboard_history(date: str | None = None):
     target_date = normalize_date(date)
     connection = get_connection()
     cursor = connection.cursor()
-
     payload = {
         "date": target_date,
         "summary": query_summary_by_date(cursor, target_date),
@@ -305,9 +801,102 @@ async def dashboard_history(date: str | None = None):
         ],
         "sessions": query_sessions_by_date(cursor, target_date),
     }
-
     connection.close()
     return JSONResponse(payload)
+
+
+@app.get("/api/settings/schema")
+async def get_settings_schema():
+    groups = schema_groups()
+    return JSONResponse(
+        {
+            "auth_initialized": AUTH_PATH.exists(),
+            "groups": groups,
+        }
+    )
+
+
+@app.get("/api/settings/basic")
+async def get_basic_settings():
+    current_config = load_config_from_disk()
+    values = {
+        field["id"]: serialize_field_value(field, current_config)
+        for field in SETTINGS_FIELDS
+        if not field.get("secure")
+    }
+    return JSONResponse({"values": values})
+
+
+@app.post("/api/settings/basic")
+async def save_basic_settings(payload: dict):
+    values = payload.get("values", {})
+    changed_fields = save_settings_values(values, secure_only=False)
+    return JSONResponse(
+        {
+            "saved": True,
+            "changed_fields": [field["id"] for field in changed_fields],
+            "messages": [field["effect"] for field in changed_fields],
+        }
+    )
+
+
+@app.post("/api/settings/bootstrap")
+async def bootstrap_settings_auth(payload: dict):
+    if AUTH_PATH.exists():
+        raise HTTPException(status_code=400, detail="Admin password already initialized")
+
+    password = str(payload.get("password", "")).strip()
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+
+    write_auth_state(password)
+    token, expires_at = issue_unlock_token()
+    return JSONResponse({"initialized": True, "token": token, "expires_at": expires_at})
+
+
+@app.post("/api/settings/unlock")
+async def unlock_secure_settings(payload: dict):
+    if not AUTH_PATH.exists():
+        return JSONResponse({"needs_bootstrap": True}, status_code=400)
+
+    password = str(payload.get("password", ""))
+    if not verify_password(password):
+        raise HTTPException(status_code=403, detail="Invalid admin password")
+
+    token, expires_at = issue_unlock_token()
+    return JSONResponse({"unlocked": True, "token": token, "expires_at": expires_at})
+
+
+@app.get("/api/settings/secure")
+async def get_secure_settings(x_admin_token: str | None = Header(default=None)):
+    require_unlock_token(x_admin_token)
+    current_config = load_config_from_disk()
+    values = {
+        field["id"]: serialize_field_value(field, current_config, secure_view=True)
+        for field in SETTINGS_FIELDS
+        if field.get("secure")
+    }
+    return JSONResponse({"values": values, "expires_at": unlock_sessions.get(x_admin_token)})
+
+
+@app.post("/api/settings/secure")
+async def save_secure_settings(payload: dict, x_admin_token: str | None = Header(default=None)):
+    require_unlock_token(x_admin_token)
+    values = payload.get("values", {})
+    changed_fields = save_settings_values(values, secure_only=True)
+    return JSONResponse(
+        {
+            "saved": True,
+            "changed_fields": [field["id"] for field in changed_fields],
+            "messages": [field["effect"] for field in changed_fields],
+        }
+    )
+
+
+@app.post("/api/settings/reload")
+async def reload_settings():
+    apply_runtime_config(load_config_from_disk())
+    return JSONResponse({"reloaded": True})
 
 
 if __name__ == "__main__":

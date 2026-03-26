@@ -38,6 +38,7 @@ class DataCollector:
         self.scale = self.config["capture"]["scale_percent"] / 100.0
         self.quality = self.config["capture"]["quality"]
         self.format = self.config["capture"]["format"]
+        self.target_screen = self.config["capture"].get("target_screen", "main")
         self.last_ai_trigger_time = time.time()
 
     def get_idle_time(self):
@@ -66,7 +67,8 @@ class DataCollector:
 
     def capture_and_compress(self):
         """Capture the main monitor and resize in memory."""
-        monitor = self.sct.monitors[1]
+        monitor_index = 0 if self.target_screen == "all" else 1
+        monitor = self.sct.monitors[monitor_index]
         sct_img = self.sct.grab(monitor)
         image = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
         new_size = (int(image.width * self.scale), int(image.height * self.scale))
