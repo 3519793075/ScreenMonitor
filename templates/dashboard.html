@@ -14,7 +14,9 @@
             --text: #1e1a16;
             --muted: #72685d;
             --danger-bg: rgba(231, 111, 81, 0.12);
+            --ok-bg: rgba(42, 157, 143, 0.12);
             --shadow: rgba(80, 59, 25, 0.08);
+            --accent: #b45a32;
         }
 
         * { box-sizing: border-box; }
@@ -110,32 +112,6 @@
             font-size: 14px;
         }
 
-        .toolbar {
-            display: flex;
-            gap: 12px;
-            align-items: center;
-            margin-top: 16px;
-            flex-wrap: wrap;
-        }
-
-        .toolbar-group {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-
-        input[type="date"], button {
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 10px 12px;
-            font: inherit;
-            background: rgba(255, 255, 255, 0.8);
-        }
-
-        button {
-            cursor: pointer;
-        }
-
         .grid {
             display: grid;
             grid-template-columns: repeat(12, minmax(0, 1fr));
@@ -148,12 +124,19 @@
             border-radius: 20px;
             padding: 20px;
             box-shadow: 0 14px 36px var(--shadow);
+            backdrop-filter: blur(10px);
         }
 
         .metric { grid-column: span 3; }
         .full { grid-column: 1 / -1; }
         .span-5 { grid-column: span 5; }
         .span-7 { grid-column: span 7; }
+
+        .current-card {
+            grid-column: 1 / -1;
+            display: grid;
+            gap: 14px;
+        }
 
         .section-title {
             margin: 0 0 14px;
@@ -177,9 +160,76 @@
             font-size: 13px;
         }
 
+        .current-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            align-items: flex-start;
+            flex-wrap: wrap;
+        }
+
+        .current-title {
+            margin: 0;
+            font-size: 26px;
+        }
+
+        .current-summary {
+            margin: 6px 0 0;
+            color: var(--muted);
+            line-height: 1.6;
+        }
+
+        .status-badge {
+            border-radius: 999px;
+            padding: 8px 12px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .status-ok {
+            background: var(--ok-bg);
+            color: #1d6f63;
+        }
+
+        .status-deviated {
+            background: var(--danger-bg);
+            color: #a14329;
+        }
+
+        .current-meta {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        .meta-box {
+            border: 1px solid rgba(57, 43, 23, 0.08);
+            border-radius: 16px;
+            padding: 14px;
+            background: rgba(255, 255, 255, 0.5);
+        }
+
+        .meta-label {
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .meta-value {
+            margin-top: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            word-break: break-word;
+        }
+
         .chart {
             width: 100%;
-            height: 340px;
+            height: 360px;
+        }
+
+        .note {
+            margin-top: 10px;
+            color: var(--muted);
+            font-size: 12px;
         }
 
         table {
@@ -209,8 +259,12 @@
         }
 
         @media (max-width: 960px) {
-            .metric, .full, .span-5, .span-7 {
+            .metric, .full, .current-card, .span-5, .span-7 {
                 grid-column: 1 / -1;
+            }
+
+            .current-meta {
+                grid-template-columns: 1fr 1fr;
             }
 
             .topbar-inner,
@@ -221,6 +275,10 @@
         }
 
         @media (max-width: 640px) {
+            .current-meta {
+                grid-template-columns: 1fr;
+            }
+
             .topbar-inner {
                 align-items: flex-start;
                 flex-direction: column;
@@ -236,76 +294,98 @@
             <span>ScreenMonitor</span>
         </a>
         <nav class="nav-links">
-            <a class="nav-link" href="/">今日统计看板</a>
-            <a class="nav-link active" href="/history">历史记录</a>
+            <a class="nav-link active" href="/">今日统计看板</a>
+            <a class="nav-link" href="/history">历史记录</a>
         </nav>
     </div>
 </header>
 
 <div class="page">
     <section class="hero">
-        <h1>历史回顾</h1>
-        <p>按日期查看当天概览、分类占比、小时图和 session 列表。</p>
-        <div class="toolbar">
-            <input id="dateInput" type="date">
-            <div class="toolbar-group">
-                <button id="todayButton" type="button">今天</button>
-                <button id="prevDayButton" type="button">前一天</button>
-                <button id="nextDayButton" type="button">后一天</button>
-            </div>
-            <button id="loadButton" type="button">查看当天</button>
-        </div>
+        <h1>今日统计看板</h1>
+        <p>展示实时监督状态、今日概览、分类占比、最近 session 列表和按小时统计。</p>
     </section>
 
     <section class="grid">
-        <article class="card metric">
-            <div class="metric-label">总时长</div>
-            <div class="metric-value" id="totalDuration">0s</div>
-            <div class="metric-sub">由当天全部 session 汇总</div>
+        <article class="card current-card">
+            <div class="current-header">
+                <div>
+                    <h2 class="current-title">当前进行中的 Session</h2>
+                    <p class="current-summary" id="currentSummary">加载中...</p>
+                </div>
+                <div id="currentStatusBadge" class="status-badge status-ok">状态未知</div>
+            </div>
+            <div class="current-meta">
+                <div class="meta-box">
+                    <div class="meta-label">当前应用</div>
+                    <div class="meta-value" id="currentApp">-</div>
+                </div>
+                <div class="meta-box">
+                    <div class="meta-label">已持续多久</div>
+                    <div class="meta-value" id="currentDuration">-</div>
+                </div>
+                <div class="meta-box">
+                    <div class="meta-label">是否偏离</div>
+                    <div class="meta-value" id="currentDeviation">-</div>
+                </div>
+                <div class="meta-box">
+                    <div class="meta-label">最后更新时间</div>
+                    <div class="meta-value mono" id="currentUpdatedAt">-</div>
+                </div>
+            </div>
         </article>
+
+        <article class="card metric">
+            <div class="metric-label">今日总时长</div>
+            <div class="metric-value" id="totalDuration">0s</div>
+            <div class="metric-sub">由今日全部 session 汇总</div>
+        </article>
+
         <article class="card metric">
             <div class="metric-label">专注学习时长</div>
             <div class="metric-value" id="studyDuration">0s</div>
             <div class="metric-sub">被判定为学习相关</div>
         </article>
+
         <article class="card metric">
             <div class="metric-label">偏离目标时长</div>
             <div class="metric-value" id="deviatedDuration">0s</div>
             <div class="metric-sub">被判定为偏离目标</div>
         </article>
+
         <article class="card metric">
-            <div class="metric-label">当日记录数</div>
+            <div class="metric-label">今日记录数</div>
             <div class="metric-value" id="totalSessions">0</div>
-            <div class="metric-sub">当天开始的行为段数量</div>
+            <div class="metric-sub">今日开始的行为段数量</div>
         </article>
 
         <article class="card span-7">
             <h2 class="section-title">按小时统计柱状图</h2>
-            <div id="historyHourlyChart" class="chart"></div>
+            <div id="hourlyChart" class="chart"></div>
+            <div class="note">当前版本按 session 开始时间归入小时区间，跨小时行为段暂未拆分。</div>
         </article>
 
         <article class="card span-5">
             <h2 class="section-title">分类占比图</h2>
-            <div id="historyCategoryChart" class="chart"></div>
+            <div id="categoryChart" class="chart"></div>
+            <div class="note">按今日时长汇总 category，快速看出时间主要花在哪。</div>
         </article>
 
         <article class="card full">
-            <h2 class="section-title">当天 Session 列表</h2>
+            <h2 class="section-title">最近 Session 列表</h2>
             <table>
                 <thead>
                 <tr>
                     <th>开始时间</th>
                     <th>结束时间</th>
-                    <th>时长</th>
                     <th>App</th>
                     <th>Category</th>
                     <th>AI Summary</th>
-                    <th>模型</th>
                 </tr>
                 </thead>
-                <tbody id="historyTable">
+                <tbody id="recentTable">
                 <tr>
-                    <td colspan="7">加载中...</td>
+                    <td colspan="5">加载中...</td>
                 </tr>
                 </tbody>
             </table>
@@ -314,8 +394,9 @@
 </div>
 
 <script>
-    const historyChart = echarts.init(document.getElementById("historyHourlyChart"));
-    const categoryChart = echarts.init(document.getElementById("historyCategoryChart"));
+    const hourlyChart = echarts.init(document.getElementById("hourlyChart"));
+    const categoryChart = echarts.init(document.getElementById("categoryChart"));
+    let currentSessionItem = null;
 
     function formatSeconds(seconds) {
         const value = Number(seconds || 0);
@@ -351,21 +432,51 @@
         return String(value).replace("T", " ").split(".")[0];
     }
 
-    function getSelectedDate() {
-        const params = new URLSearchParams(window.location.search);
-        return params.get("date") || new Date().toISOString().slice(0, 10);
+    function getElapsedSeconds(startTime) {
+        if (!startTime) return 0;
+        const startedAt = new Date(startTime);
+        if (Number.isNaN(startedAt.getTime())) return 0;
+        return Math.max(0, Math.floor((Date.now() - startedAt.getTime()) / 1000));
     }
 
-    function shiftDate(dateValue, deltaDays) {
-        const date = new Date(`${dateValue}T00:00:00`);
-        if (Number.isNaN(date.getTime())) return getSelectedDate();
-        date.setDate(date.getDate() + deltaDays);
-        return date.toISOString().slice(0, 10);
+    function renderCurrent(item) {
+        const summary = document.getElementById("currentSummary");
+        const badge = document.getElementById("currentStatusBadge");
+        currentSessionItem = item;
+
+        if (!item) {
+            summary.textContent = "暂无当前 session。";
+            badge.textContent = "暂无数据";
+            badge.className = "status-badge status-ok";
+            document.getElementById("currentApp").textContent = "-";
+            document.getElementById("currentDuration").textContent = "-";
+            document.getElementById("currentDeviation").textContent = "-";
+            document.getElementById("currentUpdatedAt").textContent = "-";
+            return;
+        }
+
+        const deviated = Number(item.is_deviated) === 1;
+        summary.textContent = item.ai_summary || "暂无摘要";
+        badge.textContent = deviated ? "当前偏离" : "当前正常";
+        badge.className = `status-badge ${deviated ? "status-deviated" : "status-ok"}`;
+        document.getElementById("currentApp").textContent = item.app_name || "-";
+        document.getElementById("currentDeviation").textContent = deviated ? "是" : "否";
+        document.getElementById("currentUpdatedAt").textContent = formatDateTime(item.updated_at || item.end_time || item.start_time);
+        updateCurrentDuration();
+    }
+
+    function updateCurrentDuration() {
+        const durationNode = document.getElementById("currentDuration");
+        if (!currentSessionItem) {
+            durationNode.textContent = "-";
+            return;
+        }
+        durationNode.textContent = formatSeconds(getElapsedSeconds(currentSessionItem.start_time));
     }
 
     function renderHourly(items) {
-        historyChart.setOption({
-            animationDuration: 400,
+        hourlyChart.setOption({
+            animationDuration: 500,
             tooltip: {
                 trigger: "axis",
                 formatter: (params) => {
@@ -381,11 +492,15 @@
             grid: { left: 24, right: 24, top: 52, bottom: 24, containLabel: true },
             xAxis: {
                 type: "category",
-                data: items.map((item) => item.hour_label)
+                data: items.map((item) => item.hour),
+                axisLabel: { formatter: (value) => `${value}:00` }
             },
             yAxis: {
                 type: "value",
-                name: "分钟"
+                name: "分钟",
+                axisLabel: {
+                    formatter: (value) => `${value}`
+                }
             },
             series: [
                 {
@@ -438,10 +553,10 @@
         });
     }
 
-    function renderSessions(items) {
-        const tbody = document.getElementById("historyTable");
+    function renderRecent(items) {
+        const tbody = document.getElementById("recentTable");
         if (!items.length) {
-            tbody.innerHTML = `<tr><td colspan="7">当天暂无记录</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="5">暂无记录</td></tr>`;
             return;
         }
 
@@ -449,53 +564,42 @@
             <tr class="${Number(item.is_deviated) === 1 ? "deviated" : ""}">
                 <td class="mono">${escapeHtml(formatDateTime(item.start_time))}</td>
                 <td class="mono">${escapeHtml(formatDateTime(item.end_time))}</td>
-                <td>${formatSeconds(item.duration_seconds)}</td>
                 <td>${escapeHtml(item.app_name || "")}</td>
                 <td>${escapeHtml(item.category || "unknown")}</td>
                 <td>${escapeHtml(item.ai_summary || "")}</td>
-                <td>${escapeHtml(item.model_used || "")}</td>
             </tr>
         `).join("");
     }
 
-    async function loadHistory(dateValue) {
-        const response = await fetch(`/api/dashboard/history?date=${encodeURIComponent(dateValue)}`);
-        const payload = await response.json();
+    async function loadDashboard() {
+        const [currentResponse, summaryResponse, recentResponse, hourlyResponse] = await Promise.all([
+            fetch("/api/dashboard/current"),
+            fetch("/api/dashboard/summary"),
+            fetch("/api/dashboard/recent?limit=20"),
+            fetch("/api/dashboard/hourly")
+        ]);
 
-        document.getElementById("dateInput").value = payload.date;
-        document.getElementById("totalDuration").textContent = formatSeconds(payload.summary.total_seconds || 0);
-        document.getElementById("studyDuration").textContent = formatSeconds(payload.summary.study_seconds || 0);
-        document.getElementById("deviatedDuration").textContent = formatSeconds(payload.summary.deviated_seconds || 0);
-        document.getElementById("totalSessions").textContent = payload.summary.session_count || 0;
+        const current = await currentResponse.json();
+        const summary = await summaryResponse.json();
+        const recent = await recentResponse.json();
+        const hourly = await hourlyResponse.json();
 
-        renderHourly(payload.hourly || []);
-        renderCategory(payload.summary || {});
-        renderSessions(payload.sessions || []);
+        renderCurrent(current.item || null);
+        document.getElementById("totalDuration").textContent = formatSeconds(summary.total_seconds || 0);
+        document.getElementById("studyDuration").textContent = formatSeconds(summary.study_seconds || 0);
+        document.getElementById("deviatedDuration").textContent = formatSeconds(summary.deviated_seconds || 0);
+        document.getElementById("totalSessions").textContent = summary.session_count || 0;
 
-        const params = new URLSearchParams(window.location.search);
-        params.set("date", payload.date);
-        history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
+        renderRecent(recent.items || []);
+        renderHourly(hourly.items || []);
+        renderCategory(summary);
     }
 
-    document.getElementById("loadButton").addEventListener("click", () => {
-        loadHistory(document.getElementById("dateInput").value);
-    });
-
-    document.getElementById("todayButton").addEventListener("click", () => {
-        loadHistory(new Date().toISOString().slice(0, 10));
-    });
-
-    document.getElementById("prevDayButton").addEventListener("click", () => {
-        loadHistory(shiftDate(document.getElementById("dateInput").value || getSelectedDate(), -1));
-    });
-
-    document.getElementById("nextDayButton").addEventListener("click", () => {
-        loadHistory(shiftDate(document.getElementById("dateInput").value || getSelectedDate(), 1));
-    });
-
-    loadHistory(getSelectedDate());
+    loadDashboard();
+    setInterval(updateCurrentDuration, 1000);
+    setInterval(loadDashboard, 30000);
     window.addEventListener("resize", () => {
-        historyChart.resize();
+        hourlyChart.resize();
         categoryChart.resize();
     });
 </script>
