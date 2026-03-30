@@ -1,7 +1,0 @@
-{
-  "scheme": "pbkdf2_sha256",
-  "iterations": 200000,
-  "salt": "b98cdd308658551cc6d7d27d17029e5c",
-  "password_hash": "5ee40127128dd31acf2a90e9283b3974db427567f63e68089af9bcc005ee30ef",
-  "created_at": "2026-03-26T18:20:28.590753"
-}
