@@ -249,6 +249,16 @@ SETTINGS_FIELDS = [
         "secure": True,
     },
     {
+        "id": "qwen_fallback_model",
+        "path": ["ai_models", "qwen_fallback_model"],
+        "group": "secure",
+        "label": "Qwen 兜底模型",
+        "type": "text",
+        "help": "推荐使用 qwen-vl-plus 或 qwen-vl-max 这类视觉理解模型。",
+        "effect": "保存后建议重启服务",
+        "secure": True,
+    },
+    {
         "id": "timeout_seconds",
         "path": ["ai_models", "timeout_seconds"],
         "group": "secure",
@@ -324,6 +334,17 @@ SETTINGS_FIELDS = [
         "secret": True,
     },
     {
+        "id": "qwen_api_key",
+        "path": ["api_keys", "qwen"],
+        "group": "secure",
+        "label": "Qwen API Key",
+        "type": "password",
+        "help": "敏感字段，仅显示掩码。支持 DashScope 兼容模式。",
+        "effect": "保存后建议重启服务",
+        "secure": True,
+        "secret": True,
+    },
+    {
         "id": "kimi_api_key",
         "path": ["api_keys", "kimi"],
         "group": "secure",
@@ -350,8 +371,16 @@ SETTINGS_FIELDS = [
 
 def on_ai_trigger(frame_data):
     """Bridge collector thread events into the FastAPI event loop."""
-    if main_loop and ai_router:
-        asyncio.run_coroutine_threadsafe(ai_router.analyze_frame(frame_data), main_loop)
+    if not main_loop or not ai_router or main_loop.is_closed():
+        logger.debug("Skip AI trigger because the event loop is unavailable.")
+        return
+
+    coroutine = ai_router.analyze_frame(frame_data)
+    try:
+        asyncio.run_coroutine_threadsafe(coroutine, main_loop)
+    except RuntimeError:
+        coroutine.close()
+        logger.debug("Skip AI trigger because the event loop is already closed.")
 
 
 def load_config_from_disk():
@@ -691,8 +720,13 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("[System] Shutting down")
+    if collector_instance:
+        collector_instance.trigger_ai_callback = None
+        collector_instance.stop()
+        collector_thread.join(timeout=2)
     if storage_manager and storage_manager.current_session:
         storage_manager._append_to_jsonl(storage_manager.current_session)
+    main_loop = None
     logger.info("[System] Shutdown complete")
 
 

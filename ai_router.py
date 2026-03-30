@@ -16,8 +16,10 @@ class AIRouter:
         self.goal = self.config.get("context", {}).get("current_goal", "未知目标")
         self.timeout_seconds = int(self.config.get("ai_models", {}).get("timeout_seconds", 20))
         self.max_retries = int(self.config.get("ai_models", {}).get("max_retries", 0))
+        self.qwen_model_name = self._resolve_qwen_model_name()
 
         self.gemini_api_key = self.config.get("api_keys", {}).get("gemini", "")
+        self.qwen_api_key = self.config.get("api_keys", {}).get("qwen", "") or os.getenv("DASHSCOPE_API_KEY", "")
         self.kimi_api_key = self.config.get("api_keys", {}).get("kimi", "")
 
         self.gemini_client = None
@@ -27,6 +29,15 @@ class AIRouter:
         else:
             logger.warning("Gemini API key is missing; Gemini analysis is disabled.")
 
+        self.qwen_client = None
+        if self.qwen_api_key:
+            self.qwen_client = AsyncOpenAI(
+                api_key=self.qwen_api_key,
+                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            )
+        else:
+            logger.warning("Qwen API key is missing; Qwen fallback is disabled.")
+
         self.kimi_client = None
         if self.kimi_api_key and self.kimi_api_key != "在这里填入你的_Kimi_API_Key_如果不用可留空":
             self.kimi_client = AsyncOpenAI(
@@ -35,6 +46,15 @@ class AIRouter:
             )
         else:
             logger.warning("Kimi API key is missing; Kimi fallback is disabled.")
+
+    def _resolve_qwen_model_name(self):
+        configured_name = self.config.get("ai_models", {}).get("qwen_fallback_model", "qwen-vl-plus")
+        if str(configured_name).startswith("qwen-image"):
+            logger.warning(
+                "qwen-image-2.0-pro 属于图像生成模型，不适合当前的图像理解兜底；已自动改用 qwen-vl-plus。"
+            )
+            return "qwen-vl-plus"
+        return configured_name
 
     def _local_rule_engine(self, app_name, window_title):
         """Fast local classification for obvious apps and titles."""
@@ -132,7 +152,7 @@ JSON 字段要求：
             if attempt < attempts:
                 await asyncio.sleep(0.3)
 
-        logger.warning("Gemini 已不可用，准备切换到 Kimi 兜底")
+        logger.warning("Gemini 已不可用，准备切换到 Qwen 兜底")
         return None
 
     async def _call_kimi_fallback(self, base64_image, prompt):
@@ -161,11 +181,31 @@ JSON 字段要求：
                                 ],
                             }
                         ],
-                        max_tokens=200,
+                        max_tokens=600,
                         temperature=1,
                     )
                 )
-                parsed = self._parse_json_response(response.choices[0].message.content)
+                raw_content = ""
+                response_preview = ""
+
+                try:
+                    choice = response.choices[0]
+                    raw_content = getattr(choice.message, "content", "")
+                except Exception:
+                    raw_content = ""
+
+                try:
+                    if hasattr(response, "model_dump_json"):
+                        response_preview = response.model_dump_json(indent=2)
+                    else:
+                        response_preview = repr(response)
+                except Exception:
+                    response_preview = repr(response)
+
+                logger.info(f"Kimi 原始 content: {repr(raw_content)[:1000]}")
+                logger.info(f"Kimi 原始响应预览: {response_preview[:2000]}")
+
+                parsed = self._parse_json_response(raw_content)
                 if parsed:
                     return parsed
 
@@ -174,6 +214,70 @@ JSON 字段要求：
                 logger.error(f"Kimi 调用超时，第 {attempt}/{attempts} 次超过 {self.timeout_seconds}s")
             except Exception as exc:
                 logger.error(f"Kimi 调用异常，第 {attempt}/{attempts} 次: {exc}")
+
+            if attempt < attempts:
+                await asyncio.sleep(0.3)
+
+        return None
+
+    async def _call_qwen_fallback(self, base64_image, prompt):
+        """Call Qwen as the first vision fallback after Gemini."""
+        if not self.qwen_client:
+            logger.warning("Qwen fallback skipped because client is not initialized.")
+            return None
+
+        attempts = max(1, self.max_retries + 1)
+        logger.info(f"触发 Qwen Vision 兜底分析，模型: {self.qwen_model_name}")
+
+        for attempt in range(1, attempts + 1):
+            try:
+                response = await self._run_with_timeout(
+                    self.qwen_client.chat.completions.create(
+                        model=self.qwen_model_name,
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": prompt},
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
+                                    },
+                                ],
+                            }
+                        ],
+                        max_tokens=600,
+                    )
+                )
+                raw_content = ""
+                response_preview = ""
+
+                try:
+                    choice = response.choices[0]
+                    raw_content = getattr(choice.message, "content", "")
+                except Exception:
+                    raw_content = ""
+
+                try:
+                    if hasattr(response, "model_dump_json"):
+                        response_preview = response.model_dump_json(indent=2)
+                    else:
+                        response_preview = repr(response)
+                except Exception:
+                    response_preview = repr(response)
+
+                logger.info(f"Qwen 原始 content: {repr(raw_content)[:1000]}")
+                logger.info(f"Qwen 原始响应预览: {response_preview[:2000]}")
+
+                parsed = self._parse_json_response(raw_content)
+                if parsed:
+                    return parsed
+
+                logger.error(f"Qwen 返回内容异常，第 {attempt}/{attempts} 次未解析出有效 JSON")
+            except asyncio.TimeoutError:
+                logger.error(f"Qwen 调用超时，第 {attempt}/{attempts} 次超过 {self.timeout_seconds}s")
+            except Exception as exc:
+                logger.error(f"Qwen 调用异常，第 {attempt}/{attempts} 次: {exc}")
 
             if attempt < attempts:
                 await asyncio.sleep(0.3)
@@ -234,18 +338,32 @@ JSON 字段要求：
 
         low_confidence_threshold = self.config["ai_models"]["low_confidence_threshold"]
         if not ai_result or ai_result.get("confidence", 0.0) < low_confidence_threshold:
+            base64_img = self._image_to_base64(pil_image)
             if ai_result:
                 logger.warning(
                     f"Gemini 结果置信度过低({ai_result.get('confidence', 0.0):.2f} < "
-                    f"{low_confidence_threshold:.2f})，切换到 Kimi"
+                    f"{low_confidence_threshold:.2f})，切换到 Qwen"
                 )
             else:
-                logger.warning("Gemini 未返回可用结果，立即切换到 Kimi")
-            base64_img = self._image_to_base64(pil_image)
-            fallback_result = await self._call_kimi_fallback(base64_img, prompt)
-            if fallback_result:
-                ai_result = fallback_result
-                source = "kimi"
+                logger.warning("Gemini 未返回可用结果，立即切换到 Qwen")
+
+            qwen_result = await self._call_qwen_fallback(base64_img, prompt)
+            if qwen_result and qwen_result.get("confidence", 0.0) >= low_confidence_threshold:
+                ai_result = qwen_result
+                source = "qwen"
+            else:
+                if qwen_result:
+                    logger.warning(
+                        f"Qwen 结果置信度过低({qwen_result.get('confidence', 0.0):.2f} < "
+                        f"{low_confidence_threshold:.2f})，切换到 Kimi"
+                    )
+                else:
+                    logger.warning("Qwen 未返回可用结果，立即切换到 Kimi")
+
+                kimi_result = await self._call_kimi_fallback(base64_img, prompt)
+                if kimi_result:
+                    ai_result = kimi_result
+                    source = "kimi"
 
         if not ai_result:
             ai_result = {

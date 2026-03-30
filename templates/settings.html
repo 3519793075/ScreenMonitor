@@ -1,0 +1,957 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <style>
+        :root {
+            --bg: #f4efe7;
+            --panel: rgba(255, 251, 245, 0.94);
+            --nav: rgba(250, 245, 238, 0.9);
+            --border: rgba(57, 43, 23, 0.1);
+            --text: #1e1a16;
+            --muted: #72685d;
+            --accent: #b45a32;
+            --accent-soft: rgba(180, 90, 50, 0.1);
+            --ok: #2a9d8f;
+            --warn: #e76f51;
+            --shadow: rgba(80, 59, 25, 0.08);
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: "Segoe UI", "PingFang SC", sans-serif;
+            color: var(--text);
+            background:
+                radial-gradient(circle at top left, rgba(42, 157, 143, 0.14), transparent 28%),
+                radial-gradient(circle at top right, rgba(231, 111, 81, 0.14), transparent 32%),
+                linear-gradient(135deg, #f7f2ea 0%, #efe7dc 100%);
+        }
+
+        a {
+            color: inherit;
+            text-decoration: none;
+        }
+
+        button,
+        input,
+        select {
+            font: inherit;
+        }
+
+        .topbar {
+            position: sticky;
+            top: 0;
+            z-index: 30;
+            backdrop-filter: blur(14px);
+            background: var(--nav);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .topbar-inner {
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 14px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+        }
+
+        .brand {
+            display: inline-flex;
+            align-items: center;
+            gap: 12px;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+        }
+
+        .brand-mark {
+            width: 12px;
+            height: 12px;
+            border-radius: 999px;
+            background: linear-gradient(135deg, #2a9d8f, #e76f51);
+            box-shadow: 0 0 0 6px rgba(180, 90, 50, 0.08);
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .nav-link {
+            padding: 9px 14px;
+            border-radius: 999px;
+            color: var(--muted);
+            border: 1px solid transparent;
+        }
+
+        .nav-link.active {
+            color: var(--text);
+            background: rgba(255, 255, 255, 0.7);
+            border-color: var(--border);
+        }
+
+        .page {
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 28px 20px 48px;
+        }
+
+        .hero {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            align-items: flex-start;
+            flex-wrap: wrap;
+            margin-bottom: 22px;
+        }
+
+        .hero h1 {
+            margin: 0;
+            font-size: 34px;
+        }
+
+        .hero p {
+            margin: 10px 0 0;
+            color: var(--muted);
+            font-size: 14px;
+            line-height: 1.7;
+        }
+
+        .hero-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .button,
+        .ghost-button,
+        .warn-button {
+            border-radius: 12px;
+            padding: 10px 14px;
+            border: 1px solid var(--border);
+            cursor: pointer;
+            transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+        }
+
+        .button:hover,
+        .ghost-button:hover,
+        .warn-button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 8px 20px rgba(80, 59, 25, 0.08);
+        }
+
+        .button {
+            color: #fff;
+            border-color: transparent;
+            background: linear-gradient(135deg, #b45a32, #cf7d53);
+        }
+
+        .ghost-button {
+            background: rgba(255, 255, 255, 0.75);
+        }
+
+        .warn-button {
+            color: #8b3b24;
+            background: rgba(231, 111, 81, 0.1);
+        }
+
+        .stack {
+            display: grid;
+            gap: 18px;
+        }
+
+        .card {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 22px;
+            box-shadow: 0 14px 36px var(--shadow);
+            backdrop-filter: blur(10px);
+        }
+
+        .card-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 16px;
+            margin-bottom: 18px;
+            flex-wrap: wrap;
+        }
+
+        .card-head h2,
+        .card-head h3 {
+            margin: 0;
+            font-size: 20px;
+        }
+
+        .card-head p {
+            margin: 8px 0 0;
+            color: var(--muted);
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .lock-pill,
+        .effect-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .lock-pill {
+            background: rgba(255, 255, 255, 0.72);
+            border: 1px solid var(--border);
+            color: var(--muted);
+        }
+
+        .effect-pill {
+            color: #7c4a2a;
+            background: var(--accent-soft);
+        }
+
+        .alert {
+            display: none;
+            border-radius: 14px;
+            padding: 12px 14px;
+            margin-bottom: 16px;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .alert.show {
+            display: block;
+        }
+
+        .alert.success {
+            color: #195f55;
+            background: rgba(42, 157, 143, 0.14);
+            border: 1px solid rgba(42, 157, 143, 0.24);
+        }
+
+        .alert.error {
+            color: #8b3b24;
+            background: rgba(231, 111, 81, 0.14);
+            border: 1px solid rgba(231, 111, 81, 0.24);
+        }
+
+        .section-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 16px 18px;
+        }
+
+        .field {
+            border: 1px solid rgba(57, 43, 23, 0.08);
+            border-radius: 16px;
+            padding: 16px;
+            background: rgba(255, 255, 255, 0.54);
+        }
+
+        .field.wide {
+            grid-column: 1 / -1;
+        }
+
+        .field-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            align-items: flex-start;
+            margin-bottom: 10px;
+        }
+
+        .field-label {
+            font-size: 15px;
+            font-weight: 600;
+        }
+
+        .field-help {
+            margin: 6px 0 0;
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .field input[type="text"],
+        .field input[type="number"],
+        .field input[type="time"],
+        .field input[type="password"],
+        .field select {
+            width: 100%;
+            padding: 11px 12px;
+            border-radius: 12px;
+            border: 1px solid rgba(57, 43, 23, 0.12);
+            background: rgba(255, 255, 255, 0.88);
+            color: var(--text);
+        }
+
+        .field input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: var(--accent);
+        }
+
+        .checkbox-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-height: 44px;
+        }
+
+        .effect {
+            margin-top: 12px;
+            color: var(--muted);
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .locked-panel,
+        .unlocked-panel {
+            display: none;
+        }
+
+        .locked-panel.show,
+        .unlocked-panel.show {
+            display: block;
+        }
+
+        .unlock-box {
+            border: 1px dashed rgba(57, 43, 23, 0.18);
+            border-radius: 16px;
+            padding: 18px;
+            background: rgba(255, 255, 255, 0.42);
+        }
+
+        .unlock-box p {
+            margin: 8px 0 0;
+            color: var(--muted);
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .inline-form {
+            display: flex;
+            gap: 10px;
+            margin-top: 14px;
+            flex-wrap: wrap;
+        }
+
+        .inline-form input {
+            flex: 1 1 260px;
+            min-width: 220px;
+            padding: 11px 12px;
+            border-radius: 12px;
+            border: 1px solid rgba(57, 43, 23, 0.12);
+            background: rgba(255, 255, 255, 0.88);
+        }
+
+        .meta-note {
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        @media (max-width: 900px) {
+            .section-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .topbar-inner,
+            .page {
+                padding-left: 14px;
+                padding-right: 14px;
+            }
+        }
+
+        @media (max-width: 640px) {
+            .topbar-inner {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .hero {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+<header class="topbar">
+    <div class="topbar-inner">
+        <a class="brand" href="/">
+            <span class="brand-mark"></span>
+            <span>ScreenMonitor</span>
+        </a>
+        <nav class="nav-links">
+            <a class="nav-link" href="/">今日统计看板</a>
+            <a class="nav-link" href="/history">历史记录</a>
+            <a class="nav-link active" href="/settings">配置</a>
+        </nav>
+    </div>
+</header>
+
+<div class="page">
+    <section class="hero">
+        <div>
+            <h1>配置</h1>
+            <p>通过表单更新本地配置并同步到运行中的监督服务。普通修改可直接保存，敏感修改需要管理密码解锁，解锁有效期为 10 分钟。</p>
+        </div>
+        <div class="hero-actions">
+            <button id="reloadButton" class="ghost-button" type="button">重新加载配置</button>
+        </div>
+    </section>
+
+    <div id="pageAlert" class="alert"></div>
+
+    <div class="stack">
+        <section class="card">
+            <div class="card-head">
+                <div>
+                    <h2>基础设置</h2>
+                    <p>当前目标、采样频率和汇总时间等常用项。</p>
+                </div>
+            </div>
+            <form id="basicForm">
+                <div id="basicFields" class="section-grid"></div>
+                <div class="hero-actions" style="margin-top: 18px;">
+                    <button class="button" type="submit">保存基础设置</button>
+                </div>
+            </form>
+        </section>
+
+        <section class="card">
+            <div class="card-head">
+                <div>
+                    <h2>监督规则</h2>
+                    <p>与 idle、静态屏幕和窗口切换判定相关的运行规则。</p>
+                </div>
+            </div>
+            <form id="rulesForm">
+                <div id="rulesFields" class="section-grid"></div>
+                <div class="hero-actions" style="margin-top: 18px;">
+                    <button class="button" type="submit">保存监督规则</button>
+                </div>
+            </form>
+        </section>
+
+        <section class="card">
+            <div class="card-head">
+                <div>
+                    <h2>系统与存储</h2>
+                    <p>运行体验、日志保留与本地存储策略。</p>
+                </div>
+            </div>
+            <form id="systemForm">
+                <div id="systemFields" class="section-grid"></div>
+                <div class="hero-actions" style="margin-top: 18px;">
+                    <button class="button" type="submit">保存系统设置</button>
+                </div>
+            </form>
+        </section>
+
+        <section class="card">
+            <div class="card-head">
+                <div>
+                    <h2>高级与敏感设置</h2>
+                    <p>模型、API Keys、Webhook 与运行策略。进入编辑前需要本地管理密码。</p>
+                </div>
+                <span id="secureState" class="lock-pill">未解锁</span>
+            </div>
+
+            <div id="bootstrapPanel" class="locked-panel">
+                <div class="unlock-box">
+                    <h3 style="margin: 0;">初始化本地管理密码</h3>
+                    <p>首次进入敏感设置时需要先设置一个本地管理密码。密码只会以哈希形式保存在本机，不会回显明文。</p>
+                    <form id="bootstrapForm" class="inline-form">
+                        <input id="bootstrapPassword" type="password" autocomplete="new-password" placeholder="设置本地管理密码">
+                        <button class="button" type="submit">初始化并解锁</button>
+                    </form>
+                </div>
+            </div>
+
+            <div id="unlockPanel" class="locked-panel">
+                <div class="unlock-box">
+                    <h3 style="margin: 0;">编辑敏感设置</h3>
+                    <p>输入本地管理密码后解锁 10 分钟。关闭页面后令牌也会自动失效。</p>
+                    <form id="unlockForm" class="inline-form">
+                        <input id="unlockPassword" type="password" autocomplete="current-password" placeholder="输入本地管理密码">
+                        <button class="button" type="submit">验证并解锁</button>
+                    </form>
+                </div>
+            </div>
+
+            <div id="securePanel" class="unlocked-panel">
+                <div class="card-head" style="margin-bottom: 14px;">
+                    <div>
+                        <h3>敏感项已解锁</h3>
+                        <p id="unlockExpiry" class="meta-note">将在 10 分钟后自动锁回。</p>
+                    </div>
+                    <button id="lockNowButton" class="warn-button" type="button">立即锁定</button>
+                </div>
+                <form id="secureForm">
+                    <div id="secureFields" class="section-grid"></div>
+                    <div class="hero-actions" style="margin-top: 18px;">
+                        <button class="button" type="submit">保存敏感设置</button>
+                    </div>
+                </form>
+            </div>
+        </section>
+    </div>
+</div>
+
+<script>
+    const state = {
+        schema: null,
+        basicValues: {},
+        secureValues: {},
+        secureExpiresAt: null
+    };
+
+    let expiryTimer = null;
+
+    function showAlert(message, type = "success") {
+        const alert = document.getElementById("pageAlert");
+        alert.className = `alert show ${type}`;
+        alert.textContent = message;
+        clearTimeout(showAlert.timer);
+        showAlert.timer = setTimeout(() => {
+            alert.className = "alert";
+            alert.textContent = "";
+        }, 4000);
+    }
+
+    function getStoredToken() {
+        return sessionStorage.getItem("settings_admin_token") || "";
+    }
+
+    function getStoredExpiry() {
+        return Number(sessionStorage.getItem("settings_admin_token_expires_at") || "0");
+    }
+
+    function setStoredUnlock(token, expiresAt) {
+        sessionStorage.setItem("settings_admin_token", token);
+        sessionStorage.setItem("settings_admin_token_expires_at", String(expiresAt || 0));
+    }
+
+    function clearStoredUnlock() {
+        sessionStorage.removeItem("settings_admin_token");
+        sessionStorage.removeItem("settings_admin_token_expires_at");
+    }
+
+    function formatExpiryCountdown(expiresAt) {
+        const seconds = Math.max(0, Math.floor(expiresAt - Date.now() / 1000));
+        const minutes = Math.floor(seconds / 60);
+        const restSeconds = seconds % 60;
+        return `${minutes} 分 ${String(restSeconds).padStart(2, "0")} 秒后自动锁回`;
+    }
+
+    function updateSecureState() {
+        const authInitialized = Boolean(state.schema && state.schema.auth_initialized);
+        const now = Math.floor(Date.now() / 1000);
+        const expiresAt = Number(state.secureExpiresAt || getStoredExpiry() || 0);
+        const unlocked = Boolean(getStoredToken()) && expiresAt > now;
+
+        document.getElementById("bootstrapPanel").classList.toggle("show", !authInitialized);
+        document.getElementById("unlockPanel").classList.toggle("show", authInitialized && !unlocked);
+        document.getElementById("securePanel").classList.toggle("show", authInitialized && unlocked);
+
+        const secureState = document.getElementById("secureState");
+        secureState.textContent = !authInitialized ? "未初始化密码" : (unlocked ? "已解锁" : "未解锁");
+
+        if (unlocked) {
+            document.getElementById("unlockExpiry").textContent = formatExpiryCountdown(expiresAt);
+            startExpiryTicker(expiresAt);
+        } else {
+            stopExpiryTicker();
+        }
+    }
+
+    function startExpiryTicker(expiresAt) {
+        stopExpiryTicker();
+        expiryTimer = setInterval(() => {
+            const now = Math.floor(Date.now() / 1000);
+            if (expiresAt <= now) {
+                clearStoredUnlock();
+                state.secureExpiresAt = null;
+                updateSecureState();
+                return;
+            }
+            document.getElementById("unlockExpiry").textContent = formatExpiryCountdown(expiresAt);
+        }, 1000);
+    }
+
+    function stopExpiryTicker() {
+        if (expiryTimer) {
+            clearInterval(expiryTimer);
+            expiryTimer = null;
+        }
+    }
+
+    function escapeHtml(value) {
+        return String(value ?? "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/\"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+    }
+
+    function renderField(field, value, formType) {
+        const isWide = field.type === "text" || field.type === "password";
+        const inputId = `${formType}_${field.id}`;
+        const effect = escapeHtml(field.effect || "");
+        const help = escapeHtml(field.help || "");
+        const label = escapeHtml(field.label || field.id);
+
+        if (field.type === "checkbox") {
+            return `
+                <div class="field">
+                    <div class="field-header">
+                        <div>
+                            <div class="field-label">${label}</div>
+                            <p class="field-help">${help}</p>
+                        </div>
+                        <span class="effect-pill">${effect}</span>
+                    </div>
+                    <label class="checkbox-row">
+                        <input id="${inputId}" data-field-id="${field.id}" data-field-type="checkbox" type="checkbox" ${value ? "checked" : ""}>
+                        <span>${value ? "已开启" : "未开启"}</span>
+                    </label>
+                    <div class="effect">${effect}</div>
+                </div>
+            `;
+        }
+
+        if (field.type === "select") {
+            const options = (field.options || []).map((option) => `
+                <option value="${escapeHtml(option)}" ${String(value) === String(option) ? "selected" : ""}>${escapeHtml(option)}</option>
+            `).join("");
+
+            return `
+                <div class="field">
+                    <div class="field-header">
+                        <div>
+                            <div class="field-label">${label}</div>
+                            <p class="field-help">${help}</p>
+                        </div>
+                        <span class="effect-pill">${effect}</span>
+                    </div>
+                    <select id="${inputId}" data-field-id="${field.id}" data-field-type="select">${options}</select>
+                    <div class="effect">${effect}</div>
+                </div>
+            `;
+        }
+
+        if (field.type === "password") {
+            const masked = value && value.masked ? value.masked : "";
+            const configured = Boolean(value && value.configured);
+            return `
+                <div class="field ${isWide ? "wide" : ""}">
+                    <div class="field-header">
+                        <div>
+                            <div class="field-label">${label}</div>
+                            <p class="field-help">${help}</p>
+                        </div>
+                        <span class="effect-pill">${effect}</span>
+                    </div>
+                    <input
+                        id="${inputId}"
+                        data-field-id="${field.id}"
+                        data-field-type="password"
+                        type="password"
+                        placeholder="${escapeHtml(masked || (configured ? "已配置，留空则不修改" : "未配置"))}"
+                        autocomplete="new-password"
+                    >
+                    <div class="effect">${configured ? "当前状态：已配置。留空表示保持现值。" : "当前状态：未配置。"} ${effect}</div>
+                </div>
+            `;
+        }
+
+        const inputType = field.type === "number" ? "number" : field.type === "time" ? "time" : "text";
+        const step = field.step ? ` step="${escapeHtml(field.step)}"` : "";
+        const safeValue = value == null ? "" : escapeHtml(value);
+        return `
+            <div class="field ${isWide ? "wide" : ""}">
+                <div class="field-header">
+                    <div>
+                        <div class="field-label">${label}</div>
+                        <p class="field-help">${help}</p>
+                    </div>
+                    <span class="effect-pill">${effect}</span>
+                </div>
+                <input
+                    id="${inputId}"
+                    data-field-id="${field.id}"
+                    data-field-type="${field.type}"
+                    type="${inputType}"
+                    value="${safeValue}"${step}
+                >
+                <div class="effect">${effect}</div>
+            </div>
+        `;
+    }
+
+    function renderGroup(groupKey, values, formType) {
+        const group = state.schema.groups[groupKey];
+        const container = document.getElementById(`${groupKey}Fields`);
+        container.innerHTML = group.fields.map((field) => renderField(field, values[field.id], formType)).join("");
+    }
+
+    async function loadSchema() {
+        const response = await fetch("/api/settings/schema");
+        if (!response.ok) {
+            throw new Error("加载配置结构失败");
+        }
+        state.schema = await response.json();
+    }
+
+    async function loadBasicValues() {
+        const response = await fetch("/api/settings/basic");
+        if (!response.ok) {
+            throw new Error("加载普通配置失败");
+        }
+        const payload = await response.json();
+        state.basicValues = payload.values || {};
+        renderGroup("basic", state.basicValues, "basic");
+        renderGroup("rules", state.basicValues, "rules");
+        renderGroup("system", state.basicValues, "system");
+    }
+
+    async function loadSecureValues() {
+        const token = getStoredToken();
+        if (!token) {
+            updateSecureState();
+            return;
+        }
+
+        const response = await fetch("/api/settings/secure", {
+            headers: { "X-Admin-Token": token }
+        });
+
+        if (response.status === 403) {
+            clearStoredUnlock();
+            state.secureExpiresAt = null;
+            updateSecureState();
+            return;
+        }
+
+        if (!response.ok) {
+            throw new Error("加载敏感配置失败");
+        }
+
+        const payload = await response.json();
+        state.secureValues = payload.values || {};
+        state.secureExpiresAt = Number(payload.expires_at || getStoredExpiry() || 0);
+        renderGroup("secure", state.secureValues, "secure");
+        updateSecureState();
+    }
+
+    function collectFormValues(formId) {
+        const values = {};
+        document.getElementById(formId).querySelectorAll("[data-field-id]").forEach((input) => {
+            values[input.dataset.fieldId] = input.dataset.fieldType === "checkbox" ? input.checked : input.value;
+        });
+        return values;
+    }
+
+    async function saveBasicGroup(formId) {
+        const response = await fetch("/api/settings/basic", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ values: collectFormValues(formId) })
+        });
+
+        if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            throw new Error(payload.detail || "保存失败");
+        }
+
+        const payload = await response.json();
+        await loadBasicValues();
+        showAlert(payload.messages && payload.messages.length ? payload.messages.join("；") : "已保存");
+    }
+
+    async function saveSecureGroup() {
+        const response = await fetch("/api/settings/secure", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-Admin-Token": getStoredToken()
+            },
+            body: JSON.stringify({ values: collectFormValues("secureForm") })
+        });
+
+        if (response.status === 403) {
+            clearStoredUnlock();
+            state.secureExpiresAt = null;
+            updateSecureState();
+            throw new Error("敏感设置已锁定，请重新验证密码");
+        }
+
+        if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            throw new Error(payload.detail || "保存敏感设置失败");
+        }
+
+        const payload = await response.json();
+        await loadSecureValues();
+        showAlert(payload.messages && payload.messages.length ? payload.messages.join("；") : "敏感设置已保存");
+    }
+
+    async function bootstrapPassword(password) {
+        const response = await fetch("/api/settings/bootstrap", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ password })
+        });
+
+        if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            throw new Error(payload.detail || "初始化失败");
+        }
+
+        const payload = await response.json();
+        setStoredUnlock(payload.token, payload.expires_at);
+        state.schema.auth_initialized = true;
+        state.secureExpiresAt = Number(payload.expires_at || 0);
+        await loadSecureValues();
+        showAlert("管理密码已初始化，敏感设置已解锁");
+    }
+
+    async function unlockSecure(password) {
+        const response = await fetch("/api/settings/unlock", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ password })
+        });
+
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            if (payload.needs_bootstrap) {
+                state.schema.auth_initialized = false;
+                updateSecureState();
+                throw new Error("请先初始化本地管理密码");
+            }
+            throw new Error(payload.detail || "解锁失败");
+        }
+
+        setStoredUnlock(payload.token, payload.expires_at);
+        state.secureExpiresAt = Number(payload.expires_at || 0);
+        await loadSecureValues();
+        showAlert("敏感设置已解锁");
+    }
+
+    async function reloadSettings() {
+        const response = await fetch("/api/settings/reload", { method: "POST" });
+        if (!response.ok) {
+            throw new Error("重新加载配置失败");
+        }
+        await loadBasicValues();
+        if (getStoredToken()) {
+            await loadSecureValues();
+        }
+        showAlert("已从磁盘重新加载配置");
+    }
+
+    function bindEvents() {
+        document.getElementById("basicForm").addEventListener("submit", async (event) => {
+            event.preventDefault();
+            try {
+                await saveBasicGroup("basicForm");
+            } catch (error) {
+                showAlert(error.message, "error");
+            }
+        });
+
+        document.getElementById("rulesForm").addEventListener("submit", async (event) => {
+            event.preventDefault();
+            try {
+                await saveBasicGroup("rulesForm");
+            } catch (error) {
+                showAlert(error.message, "error");
+            }
+        });
+
+        document.getElementById("systemForm").addEventListener("submit", async (event) => {
+            event.preventDefault();
+            try {
+                await saveBasicGroup("systemForm");
+            } catch (error) {
+                showAlert(error.message, "error");
+            }
+        });
+
+        document.getElementById("secureForm").addEventListener("submit", async (event) => {
+            event.preventDefault();
+            try {
+                await saveSecureGroup();
+            } catch (error) {
+                showAlert(error.message, "error");
+            }
+        });
+
+        document.getElementById("bootstrapForm").addEventListener("submit", async (event) => {
+            event.preventDefault();
+            try {
+                await bootstrapPassword(document.getElementById("bootstrapPassword").value);
+                document.getElementById("bootstrapPassword").value = "";
+            } catch (error) {
+                showAlert(error.message, "error");
+            }
+        });
+
+        document.getElementById("unlockForm").addEventListener("submit", async (event) => {
+            event.preventDefault();
+            try {
+                await unlockSecure(document.getElementById("unlockPassword").value);
+                document.getElementById("unlockPassword").value = "";
+            } catch (error) {
+                showAlert(error.message, "error");
+            }
+        });
+
+        document.getElementById("reloadButton").addEventListener("click", async () => {
+            try {
+                await reloadSettings();
+            } catch (error) {
+                showAlert(error.message, "error");
+            }
+        });
+
+        document.getElementById("lockNowButton").addEventListener("click", () => {
+            clearStoredUnlock();
+            state.secureExpiresAt = null;
+            updateSecureState();
+            showAlert("敏感设置已锁定");
+        });
+    }
+
+    async function initPage() {
+        try {
+            await loadSchema();
+            updateSecureState();
+            await loadBasicValues();
+            if (state.schema.auth_initialized && getStoredToken()) {
+                await loadSecureValues();
+            }
+        } catch (error) {
+            showAlert(error.message, "error");
+        }
+    }
+
+    bindEvents();
+    initPage();
+</script>
+</body>
+</html>

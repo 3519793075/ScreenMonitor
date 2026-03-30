@@ -40,6 +40,7 @@ class DataCollector:
         self.format = self.config["capture"]["format"]
         self.target_screen = self.config["capture"].get("target_screen", "main")
         self.last_ai_trigger_time = time.time()
+        self.running = True
 
     def get_idle_time(self):
         """Return the Windows idle time in seconds."""
@@ -93,7 +94,7 @@ class DataCollector:
             f"Collector started (interval: {self.interval}s, queue_size: {self.memory_queue.maxlen})"
         )
 
-        while True:
+        while self.running:
             started_at = time.time()
             timestamp = datetime.datetime.now().isoformat()
 
@@ -174,6 +175,14 @@ class DataCollector:
 
             elapsed = time.time() - started_at
             time.sleep(max(0, self.interval - elapsed))
+
+        if self.sct:
+            self.sct.close()
+            self.sct = None
+
+    def stop(self):
+        """Request the collector loop to stop gracefully."""
+        self.running = False
 
     def _dispatch_pseudo_event(self, category, app_name, summary, is_deviated):
         """Send a synthetic event through the same callback path as AI results."""
