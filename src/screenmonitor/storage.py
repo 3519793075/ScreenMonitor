@@ -2,6 +2,7 @@ import json
 import sqlite3
 import uuid
 from datetime import datetime
+from pathlib import Path
 
 from loguru import logger
 
@@ -9,8 +10,11 @@ from loguru import logger
 class StorageManager:
     def __init__(self, config, db_path="supervisor.db", jsonl_path="study_log.jsonl"):
         self.config = config
-        self.db_path = db_path
-        self.jsonl_path = jsonl_path
+        base_dir = Path(__file__).resolve().parents[2]
+        self.db_path = str((base_dir / db_path).resolve()) if not Path(db_path).is_absolute() else db_path
+        self.jsonl_path = (
+            str((base_dir / jsonl_path).resolve()) if not Path(jsonl_path).is_absolute() else jsonl_path
+        )
         self.current_session = None
 
         self.init_db()
@@ -198,7 +202,7 @@ class StorageManager:
 if __name__ == "__main__":
     import time
 
-    from collector import ConfigLoader
+    from .collector import ConfigLoader
 
     config = ConfigLoader.load()
     storage = StorageManager(config)

@@ -1,6 +1,7 @@
 import datetime
 import time
 from collections import deque
+from pathlib import Path
 
 import mss
 import psutil
@@ -16,7 +17,9 @@ class ConfigLoader:
     """Load YAML configuration."""
 
     @staticmethod
-    def load(config_path="config.yaml"):
+    def load(config_path=None):
+        if config_path is None:
+            config_path = Path(__file__).resolve().parents[2] / "config.yaml"
         with open(config_path, "r", encoding="utf-8") as file:
             return yaml.safe_load(file)
 
