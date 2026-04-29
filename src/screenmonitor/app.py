@@ -230,32 +230,101 @@ SETTINGS_FIELDS = [
     },
     {
         "id": "primary_model",
-        "path": ["ai_models", "primary"],
+        "path": ["ai_providers", "gemini", "model"],
         "group": "secure",
         "label": "主模型",
         "type": "text",
+        "default": "gemini-2.5-flash",
         "help": "保存后建议重启服务。",
         "effect": "保存后建议重启服务",
+        "secure": True,
+    },
+    {
+        "id": "gemini_enabled",
+        "path": ["ai_providers", "gemini", "enabled"],
+        "group": "secure",
+        "label": "启用 Gemini",
+        "type": "checkbox",
+        "default": True,
+        "help": "关闭后即使配置了 API Key 也不会调用 Gemini。",
+        "effect": "保存后立即生效",
         "secure": True,
     },
     {
         "id": "fallback_model",
-        "path": ["ai_models", "fallback"],
+        "path": ["ai_providers", "kimi", "model"],
         "group": "secure",
-        "label": "备用模型",
+        "label": "Kimi 模型",
         "type": "text",
+        "default": "kimi-k2.5",
         "help": "保存后建议重启服务。",
         "effect": "保存后建议重启服务",
         "secure": True,
     },
     {
+        "id": "kimi_enabled",
+        "path": ["ai_providers", "kimi", "enabled"],
+        "group": "secure",
+        "label": "启用 Kimi",
+        "type": "checkbox",
+        "default": True,
+        "help": "关闭后即使配置了 API Key 也不会调用 Kimi 兜底。",
+        "effect": "保存后立即生效",
+        "secure": True,
+    },
+    {
         "id": "qwen_fallback_model",
-        "path": ["ai_models", "qwen_fallback_model"],
+        "path": ["ai_providers", "qwen", "model"],
         "group": "secure",
         "label": "Qwen 兜底模型",
         "type": "text",
+        "default": "qwen-vl-plus",
         "help": "推荐使用 qwen-vl-plus 或 qwen-vl-max 这类视觉理解模型。",
         "effect": "保存后建议重启服务",
+        "secure": True,
+    },
+    {
+        "id": "qwen_enabled",
+        "path": ["ai_providers", "qwen", "enabled"],
+        "group": "secure",
+        "label": "启用 Qwen",
+        "type": "checkbox",
+        "default": True,
+        "help": "关闭后即使配置了 API Key 也不会调用 Qwen 兜底。",
+        "effect": "保存后立即生效",
+        "secure": True,
+    },
+    {
+        "id": "ai_provider_order",
+        "path": ["ai_models", "ai_provider_order"],
+        "group": "secure",
+        "label": "AI 调用顺序",
+        "type": "comma_list",
+        "default": ["gemini", "qwen", "kimi"],
+        "help": "用英文逗号分隔，例如 gemini,qwen,kimi。新 provider 加入 ai_providers 后可写到这里。",
+        "effect": "保存后立即生效",
+        "secure": True,
+    },
+    {
+        "id": "qwen_base_url",
+        "path": ["ai_providers", "qwen", "base_url"],
+        "group": "secure",
+        "label": "Qwen Base URL",
+        "type": "text",
+        "default": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "help": "OpenAI-compatible 接口地址。",
+        "effect": "保存后立即生效",
+        "secure": True,
+    },
+    {
+        "id": "kimi_base_url",
+        "path": ["ai_providers", "kimi", "base_url"],
+        "group": "secure",
+        "label": "Kimi Base URL",
+        "type": "text",
+        "default": "https://api.moonshot.cn/v1",
+        "help": "OpenAI-compatible 接口地址。",
+        "effect": "保存后立即生效",
         "secure": True,
     },
     {
@@ -603,6 +672,8 @@ def require_unlock_token(admin_token: str | None):
 
 def serialize_field_value(field, current_config, secure_view=False):
     value = get_path_value(current_config, field["path"])
+    if value is None and "default" in field:
+        value = field["default"]
     if secure_view and field.get("secret"):
         return {
             "configured": bool(value),
@@ -639,6 +710,10 @@ def coerce_field_value(field, value):
         return bool(value)
     if field["type"] == "number":
         return float(value) if field.get("kind") == "float" else int(value)
+    if field["type"] == "comma_list":
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        return [item.strip() for item in str(value).split(",") if item.strip()]
     return str(value).strip()
 
 

@@ -16,36 +16,9 @@ class AIRouter:
         self.goal = self.config.get("context", {}).get("current_goal", "未知目标")
         self.timeout_seconds = int(self.config.get("ai_models", {}).get("timeout_seconds", 20))
         self.max_retries = int(self.config.get("ai_models", {}).get("max_retries", 0))
-        self.qwen_model_name = self._resolve_qwen_model_name()
-
-        self.gemini_api_key = self.config.get("api_keys", {}).get("gemini", "")
-        self.qwen_api_key = self.config.get("api_keys", {}).get("qwen", "") or os.getenv("DASHSCOPE_API_KEY", "")
-        self.kimi_api_key = self.config.get("api_keys", {}).get("kimi", "")
-
-        self.gemini_client = None
-        self.gemini_model_name = self.config["ai_models"]["primary"]
-        if self.gemini_api_key and self.gemini_api_key != "在这里填入你的_Gemini_API_Key":
-            self.gemini_client = genai.Client(api_key=self.gemini_api_key)
-        else:
-            logger.warning("Gemini API key is missing; Gemini analysis is disabled.")
-
-        self.qwen_client = None
-        if self.qwen_api_key:
-            self.qwen_client = AsyncOpenAI(
-                api_key=self.qwen_api_key,
-                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-            )
-        else:
-            logger.warning("Qwen API key is missing; Qwen fallback is disabled.")
-
-        self.kimi_client = None
-        if self.kimi_api_key and self.kimi_api_key != "在这里填入你的_Kimi_API_Key_如果不用可留空":
-            self.kimi_client = AsyncOpenAI(
-                api_key=self.kimi_api_key,
-                base_url="https://api.moonshot.cn/v1",
-            )
-        else:
-            logger.warning("Kimi API key is missing; Kimi fallback is disabled.")
+        self.provider_configs = self._build_provider_configs()
+        self.provider_order = self._build_provider_order()
+        self.provider_clients = self._initialize_provider_clients()
 
     def _resolve_qwen_model_name(self):
         configured_name = self.config.get("ai_models", {}).get("qwen_fallback_model", "qwen-vl-plus")
@@ -55,6 +28,88 @@ class AIRouter:
             )
             return "qwen-vl-plus"
         return configured_name
+
+    def _legacy_provider_configs(self):
+        ai_models = self.config.get("ai_models", {})
+        return {
+            "gemini": {
+                "type": "gemini",
+                "enabled": ai_models.get("gemini_enabled", True) is not False,
+                "model": ai_models.get("primary", "gemini-2.5-flash"),
+                "api_key_ref": "gemini",
+            },
+            "qwen": {
+                "type": "openai_compatible",
+                "enabled": ai_models.get("qwen_enabled", True) is not False,
+                "model": self._resolve_qwen_model_name(),
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "api_key_ref": "qwen",
+                "api_key_env": "DASHSCOPE_API_KEY",
+            },
+            "kimi": {
+                "type": "openai_compatible",
+                "enabled": ai_models.get("kimi_enabled", True) is not False,
+                "model": ai_models.get("fallback", "kimi-k2.5"),
+                "base_url": "https://api.moonshot.cn/v1",
+                "api_key_ref": "kimi",
+                "temperature": 1,
+            },
+        }
+
+    def _build_provider_configs(self):
+        providers = self._legacy_provider_configs()
+        configured_providers = self.config.get("ai_providers", {}) or {}
+        for name, provider_config in configured_providers.items():
+            merged = providers.get(name, {}) | (provider_config or {})
+            providers[name] = merged
+        return providers
+
+    def _build_provider_order(self):
+        configured_order = self.config.get("ai_models", {}).get("ai_provider_order", ["gemini", "qwen", "kimi"])
+        if isinstance(configured_order, str):
+            configured_order = [item.strip() for item in configured_order.split(",") if item.strip()]
+        return [name for name in configured_order if name in self.provider_configs]
+
+    def _get_api_key(self, provider_config):
+        api_key = provider_config.get("api_key", "")
+        if api_key:
+            return api_key
+
+        key_ref = provider_config.get("api_key_ref", "")
+        if key_ref:
+            api_key = self.config.get("api_keys", {}).get(key_ref, "")
+
+        env_name = provider_config.get("api_key_env", "")
+        if not api_key and env_name:
+            api_key = os.getenv(env_name, "")
+
+        return api_key
+
+    def _initialize_provider_clients(self):
+        clients = {}
+        for name in self.provider_order:
+            provider_config = self.provider_configs[name]
+            if provider_config.get("enabled", True) is False:
+                logger.warning(f"{name} provider is disabled by configuration.")
+                continue
+
+            api_key = self._get_api_key(provider_config)
+            if not api_key:
+                logger.warning(f"{name} provider API key is missing; provider is disabled.")
+                continue
+
+            provider_type = provider_config.get("type", "openai_compatible")
+            if provider_type == "gemini":
+                clients[name] = genai.Client(api_key=api_key)
+            elif provider_type == "openai_compatible":
+                clients[name] = AsyncOpenAI(
+                    api_key=api_key,
+                    base_url=provider_config["base_url"],
+                )
+            else:
+                logger.warning(f"{name} provider type is unsupported: {provider_type}")
+
+        return clients
 
     def _local_rule_engine(self, app_name, window_title):
         """Fast local classification for obvious apps and titles."""
@@ -124,18 +179,20 @@ JSON 字段要求：
     async def _run_with_timeout(self, coro):
         return await asyncio.wait_for(coro, timeout=self.timeout_seconds)
 
-    async def _call_gemini(self, pil_image, prompt):
+    async def _call_gemini(self, provider_name, pil_image, prompt):
         """Call Gemini with the current screenshot."""
-        if not self.gemini_client:
+        client = self.provider_clients.get(provider_name)
+        if not client:
             return None
 
+        provider_config = self.provider_configs[provider_name]
         attempts = max(1, self.max_retries + 1)
         for attempt in range(1, attempts + 1):
             try:
                 response = await self._run_with_timeout(
                     asyncio.to_thread(
-                        self.gemini_client.models.generate_content,
-                        model=self.gemini_model_name,
+                        client.models.generate_content,
+                        model=provider_config["model"],
                         contents=[prompt, pil_image],
                     )
                 )
@@ -152,38 +209,43 @@ JSON 字段要求：
             if attempt < attempts:
                 await asyncio.sleep(0.3)
 
-        logger.warning("Gemini 已不可用，准备切换到 Qwen 兜底")
+        logger.warning(f"{provider_name} provider is unavailable; trying next provider.")
         return None
 
-    async def _call_kimi_fallback(self, base64_image, prompt):
-        """Call Kimi as the vision fallback."""
-        if not self.kimi_client:
-            logger.warning("Kimi fallback skipped because client is not initialized.")
+    async def _call_openai_compatible(self, provider_name, base64_image, prompt):
+        """Call an OpenAI-compatible vision provider."""
+        client = self.provider_clients.get(provider_name)
+        if not client:
+            logger.warning(f"{provider_name} provider skipped because client is not initialized.")
             return None
 
+        provider_config = self.provider_configs[provider_name]
         attempts = max(1, self.max_retries + 1)
-        logger.info("触发 Kimi Vision 兜底分析")
+        logger.info(f"Calling {provider_name} vision provider, model: {provider_config['model']}")
 
         for attempt in range(1, attempts + 1):
             try:
+                create_kwargs = {
+                    "model": provider_config["model"],
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": prompt},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
+                                },
+                            ],
+                        }
+                    ],
+                    "max_tokens": int(provider_config.get("max_tokens", 600)),
+                }
+                if "temperature" in provider_config:
+                    create_kwargs["temperature"] = provider_config["temperature"]
+
                 response = await self._run_with_timeout(
-                    self.kimi_client.chat.completions.create(
-                        model=self.config["ai_models"]["fallback"],
-                        messages=[
-                            {
-                                "role": "user",
-                                "content": [
-                                    {"type": "text", "text": prompt},
-                                    {
-                                        "type": "image_url",
-                                        "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
-                                    },
-                                ],
-                            }
-                        ],
-                        max_tokens=600,
-                        temperature=1,
-                    )
+                    client.chat.completions.create(**create_kwargs)
                 )
                 raw_content = ""
                 response_preview = ""
@@ -202,86 +264,33 @@ JSON 字段要求：
                 except Exception:
                     response_preview = repr(response)
 
-                logger.info(f"Kimi 原始 content: {repr(raw_content)[:1000]}")
-                logger.info(f"Kimi 原始响应预览: {response_preview[:2000]}")
+                logger.info(f"{provider_name} raw content: {repr(raw_content)[:1000]}")
+                logger.info(f"{provider_name} response preview: {response_preview[:2000]}")
 
                 parsed = self._parse_json_response(raw_content)
                 if parsed:
                     return parsed
 
-                logger.error(f"Kimi 返回内容异常，第 {attempt}/{attempts} 次未解析出有效 JSON")
+                logger.error(f"{provider_name} returned invalid content on attempt {attempt}/{attempts}.")
             except asyncio.TimeoutError:
-                logger.error(f"Kimi 调用超时，第 {attempt}/{attempts} 次超过 {self.timeout_seconds}s")
+                logger.error(f"{provider_name} timed out on attempt {attempt}/{attempts} after {self.timeout_seconds}s.")
             except Exception as exc:
-                logger.error(f"Kimi 调用异常，第 {attempt}/{attempts} 次: {exc}")
+                logger.error(f"{provider_name} call failed on attempt {attempt}/{attempts}: {exc}")
 
             if attempt < attempts:
                 await asyncio.sleep(0.3)
 
         return None
 
-    async def _call_qwen_fallback(self, base64_image, prompt):
-        """Call Qwen as the first vision fallback after Gemini."""
-        if not self.qwen_client:
-            logger.warning("Qwen fallback skipped because client is not initialized.")
-            return None
+    async def _call_provider(self, provider_name, pil_image, base64_image, prompt):
+        provider_config = self.provider_configs[provider_name]
+        provider_type = provider_config.get("type", "openai_compatible")
+        if provider_type == "gemini":
+            return await self._call_gemini(provider_name, pil_image, prompt)
+        if provider_type == "openai_compatible":
+            return await self._call_openai_compatible(provider_name, base64_image, prompt)
 
-        attempts = max(1, self.max_retries + 1)
-        logger.info(f"触发 Qwen Vision 兜底分析，模型: {self.qwen_model_name}")
-
-        for attempt in range(1, attempts + 1):
-            try:
-                response = await self._run_with_timeout(
-                    self.qwen_client.chat.completions.create(
-                        model=self.qwen_model_name,
-                        messages=[
-                            {
-                                "role": "user",
-                                "content": [
-                                    {"type": "text", "text": prompt},
-                                    {
-                                        "type": "image_url",
-                                        "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
-                                    },
-                                ],
-                            }
-                        ],
-                        max_tokens=600,
-                    )
-                )
-                raw_content = ""
-                response_preview = ""
-
-                try:
-                    choice = response.choices[0]
-                    raw_content = getattr(choice.message, "content", "")
-                except Exception:
-                    raw_content = ""
-
-                try:
-                    if hasattr(response, "model_dump_json"):
-                        response_preview = response.model_dump_json(indent=2)
-                    else:
-                        response_preview = repr(response)
-                except Exception:
-                    response_preview = repr(response)
-
-                logger.info(f"Qwen 原始 content: {repr(raw_content)[:1000]}")
-                logger.info(f"Qwen 原始响应预览: {response_preview[:2000]}")
-
-                parsed = self._parse_json_response(raw_content)
-                if parsed:
-                    return parsed
-
-                logger.error(f"Qwen 返回内容异常，第 {attempt}/{attempts} 次未解析出有效 JSON")
-            except asyncio.TimeoutError:
-                logger.error(f"Qwen 调用超时，第 {attempt}/{attempts} 次超过 {self.timeout_seconds}s")
-            except Exception as exc:
-                logger.error(f"Qwen 调用异常，第 {attempt}/{attempts} 次: {exc}")
-
-            if attempt < attempts:
-                await asyncio.sleep(0.3)
-
+        logger.warning(f"{provider_name} provider type is unsupported: {provider_type}")
         return None
 
     @staticmethod
@@ -332,38 +341,29 @@ JSON 字段要求：
 
         prompt = self._build_prompt(app_name, window_title)
         pil_image = frame_data["image"]
-
-        ai_result = await self._call_gemini(pil_image, prompt)
-        source = "gemini"
-
+        base64_img = None
+        ai_result = None
+        source = "fallback_unknown"
         low_confidence_threshold = self.config["ai_models"]["low_confidence_threshold"]
-        if not ai_result or ai_result.get("confidence", 0.0) < low_confidence_threshold:
-            base64_img = self._image_to_base64(pil_image)
-            if ai_result:
+        for provider_name in self.provider_order:
+            if provider_name not in self.provider_clients:
+                continue
+            if self.provider_configs[provider_name].get("type", "openai_compatible") == "openai_compatible":
+                base64_img = base64_img or self._image_to_base64(pil_image)
+
+            provider_result = await self._call_provider(provider_name, pil_image, base64_img, prompt)
+            if provider_result and provider_result.get("confidence", 0.0) >= low_confidence_threshold:
+                ai_result = provider_result
+                source = provider_name
+                break
+
+            if provider_result:
                 logger.warning(
-                    f"Gemini 结果置信度过低({ai_result.get('confidence', 0.0):.2f} < "
-                    f"{low_confidence_threshold:.2f})，切换到 Qwen"
+                    f"{provider_name} confidence too low "
+                    f"({provider_result.get('confidence', 0.0):.2f} < {low_confidence_threshold:.2f}); trying next provider."
                 )
             else:
-                logger.warning("Gemini 未返回可用结果，立即切换到 Qwen")
-
-            qwen_result = await self._call_qwen_fallback(base64_img, prompt)
-            if qwen_result and qwen_result.get("confidence", 0.0) >= low_confidence_threshold:
-                ai_result = qwen_result
-                source = "qwen"
-            else:
-                if qwen_result:
-                    logger.warning(
-                        f"Qwen 结果置信度过低({qwen_result.get('confidence', 0.0):.2f} < "
-                        f"{low_confidence_threshold:.2f})，切换到 Kimi"
-                    )
-                else:
-                    logger.warning("Qwen 未返回可用结果，立即切换到 Kimi")
-
-                kimi_result = await self._call_kimi_fallback(base64_img, prompt)
-                if kimi_result:
-                    ai_result = kimi_result
-                    source = "kimi"
+                logger.warning(f"{provider_name} returned no usable result; trying next provider.")
 
         if not ai_result:
             ai_result = {

@@ -17,12 +17,39 @@ triggers:
   away_from_keyboard_seconds: 600
 ai_models:
   primary: gemini-2.5-flash
+  gemini_enabled: true
   qwen_fallback_model: qwen-vl-plus
+  qwen_enabled: true
   fallback: kimi-k2.5
+  kimi_enabled: true
+  ai_provider_order:
+  - gemini
+  - qwen
+  - kimi
   timeout_seconds: 20
   max_retries: 2
   low_confidence_threshold: 0.7
   output_length: 1-2 sentences
+ai_providers:
+  gemini:
+    type: gemini
+    enabled: true
+    model: gemini-2.5-flash
+    api_key_ref: gemini
+  qwen:
+    type: openai_compatible
+    enabled: true
+    model: qwen-vl-plus
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    api_key_ref: qwen
+    api_key_env: DASHSCOPE_API_KEY
+  kimi:
+    type: openai_compatible
+    enabled: true
+    model: kimi-k2.5
+    base_url: https://api.moonshot.cn/v1
+    api_key_ref: kimi
+    temperature: 1
 storage:
   log_format: jsonl
   screenshot_retention_seconds: 60

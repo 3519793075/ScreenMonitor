@@ -608,7 +608,7 @@
     }
 
     function renderField(field, value, formType) {
-        const isWide = field.type === "text" || field.type === "password";
+        const isWide = field.type === "text" || field.type === "password" || field.type === "comma_list";
         const inputId = `${formType}_${field.id}`;
         const effect = escapeHtml(field.effect || "");
         const help = escapeHtml(field.help || "");
@@ -680,7 +680,7 @@
 
         const inputType = field.type === "number" ? "number" : field.type === "time" ? "time" : "text";
         const step = field.step ? ` step="${escapeHtml(field.step)}"` : "";
-        const safeValue = value == null ? "" : escapeHtml(value);
+        const safeValue = value == null ? "" : escapeHtml(Array.isArray(value) ? value.join(",") : value);
         return `
             <div class="field ${isWide ? "wide" : ""}">
                 <div class="field-header">
@@ -764,6 +764,16 @@
         });
         return values;
     }
+
+    document.addEventListener("change", (event) => {
+        const input = event.target;
+        if (input.dataset && input.dataset.fieldType === "checkbox") {
+            const label = input.closest(".checkbox-row")?.querySelector("span");
+            if (label) {
+                label.textContent = input.checked ? "已开启" : "未开启";
+            }
+        }
+    });
 
     async function saveBasicGroup(formId) {
         const response = await fetch("/api/settings/basic", {
