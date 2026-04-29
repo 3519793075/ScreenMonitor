@@ -24,6 +24,7 @@ ai_models:
   kimi_enabled: true
   ai_provider_order:
   - gemini
+  - jeniya
   - qwen
   - kimi
   timeout_seconds: 20
@@ -50,6 +51,19 @@ ai_providers:
     base_url: https://api.moonshot.cn/v1
     api_key_ref: kimi
     temperature: 1
+  aitools:
+    type: openai_compatible
+    enabled: false
+    model: qwen/qwen2.5-vl-32b
+    base_url: https://platform.aitools.cfd/api/v1
+    api_key_ref: aitools
+    input_mode: vision
+  jeniya:
+    type: gemini_rest
+    enabled: false
+    model: gemini-2.5-pro
+    base_url: https://jeniya.top
+    api_key_ref: jeniya
 storage:
   log_format: jsonl
   screenshot_retention_seconds: 60
@@ -75,4 +89,6 @@ api_keys:
   gemini: xx
   qwen: ''
   kimi: sk-xx
+  aitools: ''
+  jeniya: ''
   feishu_webhook: 在这里填入你的_飞书机器人_Webhook_URL
