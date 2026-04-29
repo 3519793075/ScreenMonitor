@@ -1,7 +1,9 @@
 import asyncio
 import base64
+import http.client
 import json
 import os
+from urllib.parse import urlencode, urlparse
 from io import BytesIO
 
 from google import genai
@@ -106,6 +108,8 @@ class AIRouter:
                     api_key=api_key,
                     base_url=provider_config["base_url"],
                 )
+            elif provider_type == "gemini_rest":
+                clients[name] = api_key
             else:
                 logger.warning(f"{name} provider type is unsupported: {provider_type}")
 
@@ -158,6 +162,12 @@ class AIRouter:
             quality=self.config["capture"]["quality"],
         )
         return base64.b64encode(buffered.getvalue()).decode("utf-8")
+
+    def _image_mime_type(self):
+        image_format = self.config["capture"]["format"].lower()
+        if image_format == "jpg":
+            image_format = "jpeg"
+        return f"image/{image_format}"
 
     def _build_prompt(self, app_name, window_title):
         return f"""
@@ -225,18 +235,23 @@ JSON 字段要求：
 
         for attempt in range(1, attempts + 1):
             try:
+                if provider_config.get("input_mode", "vision") == "text":
+                    content = prompt
+                else:
+                    content = [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
+                        },
+                    ]
+
                 create_kwargs = {
                     "model": provider_config["model"],
                     "messages": [
                         {
                             "role": "user",
-                            "content": [
-                                {"type": "text", "text": prompt},
-                                {
-                                    "type": "image_url",
-                                    "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
-                                },
-                            ],
+                            "content": content,
                         }
                     ],
                     "max_tokens": int(provider_config.get("max_tokens", 600)),
@@ -282,6 +297,96 @@ JSON 字段要求：
 
         return None
 
+    def _request_gemini_rest(self, provider_config, api_key, base64_image, prompt):
+        base_url = provider_config["base_url"].rstrip("/")
+        parsed_url = urlparse(base_url)
+        if parsed_url.scheme != "https" or not parsed_url.netloc:
+            raise ValueError(f"Invalid Gemini REST base_url: {base_url}")
+
+        path_prefix = parsed_url.path.rstrip("/")
+        query = urlencode({"key": api_key})
+        request_path = f"{path_prefix}/v1beta/models/{provider_config['model']}:generateContent?{query}"
+        payload = json.dumps(
+            {
+                "contents": [
+                    {
+                        "role": "user",
+                        "parts": [
+                            {
+                                "inline_data": {
+                                    "mime_type": self._image_mime_type(),
+                                    "data": base64_image,
+                                }
+                            },
+                            {"text": prompt},
+                        ],
+                    }
+                ]
+            }
+        )
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+
+        connection = http.client.HTTPSConnection(parsed_url.netloc, timeout=self.timeout_seconds)
+        try:
+            connection.request("POST", request_path, payload, headers)
+            response = connection.getresponse()
+            response_body = response.read().decode("utf-8", errors="replace")
+        finally:
+            connection.close()
+
+        if response.status >= 400:
+            raise RuntimeError(f"HTTP {response.status}: {response_body[:1000]}")
+
+        return response_body
+
+    async def _call_gemini_rest(self, provider_name, base64_image, prompt):
+        """Call a Gemini generateContent compatible REST provider."""
+        api_key = self.provider_clients.get(provider_name)
+        if not api_key:
+            logger.warning(f"{provider_name} provider skipped because API key is not initialized.")
+            return None
+
+        provider_config = self.provider_configs[provider_name]
+        attempts = max(1, self.max_retries + 1)
+        logger.info(f"Calling {provider_name} Gemini REST provider, model: {provider_config['model']}")
+
+        for attempt in range(1, attempts + 1):
+            try:
+                response_text = await self._run_with_timeout(
+                    asyncio.to_thread(
+                        self._request_gemini_rest,
+                        provider_config,
+                        api_key,
+                        base64_image,
+                        prompt,
+                    )
+                )
+                logger.info(f"{provider_name} raw response preview: {response_text[:2000]}")
+                response_payload = json.loads(response_text)
+                parts = (
+                    response_payload.get("candidates", [{}])[0]
+                    .get("content", {})
+                    .get("parts", [])
+                )
+                raw_content = "\n".join(part.get("text", "") for part in parts if part.get("text"))
+                parsed = self._parse_json_response(raw_content)
+                if parsed:
+                    return parsed
+
+                logger.error(f"{provider_name} returned invalid content on attempt {attempt}/{attempts}.")
+            except asyncio.TimeoutError:
+                logger.error(f"{provider_name} timed out on attempt {attempt}/{attempts} after {self.timeout_seconds}s.")
+            except Exception as exc:
+                logger.error(f"{provider_name} call failed on attempt {attempt}/{attempts}: {exc}")
+
+            if attempt < attempts:
+                await asyncio.sleep(0.3)
+
+        return None
+
     async def _call_provider(self, provider_name, pil_image, base64_image, prompt):
         provider_config = self.provider_configs[provider_name]
         provider_type = provider_config.get("type", "openai_compatible")
@@ -289,6 +394,8 @@ JSON 字段要求：
             return await self._call_gemini(provider_name, pil_image, prompt)
         if provider_type == "openai_compatible":
             return await self._call_openai_compatible(provider_name, base64_image, prompt)
+        if provider_type == "gemini_rest":
+            return await self._call_gemini_rest(provider_name, base64_image, prompt)
 
         logger.warning(f"{provider_name} provider type is unsupported: {provider_type}")
         return None
@@ -348,7 +455,13 @@ JSON 字段要求：
         for provider_name in self.provider_order:
             if provider_name not in self.provider_clients:
                 continue
-            if self.provider_configs[provider_name].get("type", "openai_compatible") == "openai_compatible":
+            provider_config = self.provider_configs[provider_name]
+            if (
+                provider_config.get("type", "openai_compatible") == "openai_compatible"
+                and provider_config.get("input_mode", "vision") == "vision"
+            ) or (
+                provider_config.get("type") == "gemini_rest"
+            ):
                 base64_img = base64_img or self._image_to_base64(pil_image)
 
             provider_result = await self._call_provider(provider_name, pil_image, base64_img, prompt)
